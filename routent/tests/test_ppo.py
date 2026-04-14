@@ -9,13 +9,13 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from llm_router_rl.config import Config
-from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor
-from llm_router_rl.env.router_env import LLMRouterEnv
-from llm_router_rl.models.llm_pool import BaseLLM
-from llm_router_rl.models.policy_network import PolicyNetwork
-from llm_router_rl.training.buffer import RolloutBuffer
-from llm_router_rl.training.ppo import PPOTrainer
+from routent.config import Config
+from routent.env.feature_extractor import TfidfFeatureExtractor
+from routent.env.router_env import LLMRouterEnv
+from routent.models.llm_pool import BaseLLM
+from routent.models.policy_network import PolicyNetwork
+from routent.training.buffer import RolloutBuffer
+from routent.training.ppo import PPOTrainer
 
 
 class StubLLM(BaseLLM):

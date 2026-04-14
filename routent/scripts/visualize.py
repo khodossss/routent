@@ -126,8 +126,8 @@ def plot_loss_curves(updates, output_dir):
 
 def main():
     parser = argparse.ArgumentParser(description="Visualize training results")
-    parser.add_argument("--log", type=str, default="llm_router_rl/results/training_log.json")
-    parser.add_argument("--output", type=str, default="llm_router_rl/results/plots")
+    parser.add_argument("--log", type=str, default="routent/results/training_log.json")
+    parser.add_argument("--output", type=str, default="routent/results/plots")
     args = parser.parse_args()
 
     with open(args.log, "r", encoding="utf-8") as f:

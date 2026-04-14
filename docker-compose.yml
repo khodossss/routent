@@ -1,7 +1,7 @@
 services:
   train:
     build: .
-    image: llm-router-rl:latest
+    image: routent:latest
     env_file:
       - .env
     volumes:
@@ -15,14 +15,14 @@ services:
 
   evaluate:
     build: .
-    image: llm-router-rl:latest
+    image: routent:latest
     env_file:
       - .env
     volumes:
       - ./configs:/app/configs:ro
       - ./results:/app/results
       - hf_cache:/root/.cache/huggingface
-    entrypoint: ["python", "-u", "llm_router_rl/scripts/evaluate.py"]
+    entrypoint: ["python", "-u", "routent/scripts/evaluate.py"]
 
 volumes:
   hf_cache:

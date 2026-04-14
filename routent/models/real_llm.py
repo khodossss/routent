@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, Tuple
 
 import tiktoken
 
-from llm_router_rl.models.llm_pool import BaseLLM
+from routent.models.llm_pool import BaseLLM
 
 # Shared tokenizer for cost estimation (cl100k_base covers GPT-4/3.5, good approximation for others)
 _tokenizer = tiktoken.get_encoding("cl100k_base")

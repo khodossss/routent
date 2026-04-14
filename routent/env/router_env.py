@@ -6,8 +6,8 @@ import gymnasium as gym
 import numpy as np
 import torch
 
-from llm_router_rl.env.feature_extractor import BaseFeatureExtractor
-from llm_router_rl.evaluation.evaluator import Evaluator
+from routent.env.feature_extractor import BaseFeatureExtractor
+from routent.evaluation.evaluator import Evaluator
 
 
 class LLMRouterEnv(gym.Env):

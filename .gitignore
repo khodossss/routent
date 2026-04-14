@@ -5,7 +5,7 @@
 
 # Training artifacts
 results/
-llm_router_rl/data/benchmark*.json
+routent/data/benchmark*.json
 
 # Python
 __pycache__/

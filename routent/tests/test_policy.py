@@ -11,7 +11,7 @@ import torch
 # Ensure project root is on the path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
-from llm_router_rl.models.policy_network import PolicyNetwork
+from routent.models.policy_network import PolicyNetwork
 
 
 @pytest.fixture

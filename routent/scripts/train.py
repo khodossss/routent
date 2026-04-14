@@ -14,13 +14,13 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from llm_router_rl.config import Config
-from llm_router_rl.data.dataset_loader import load_benchmark
-from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
-from llm_router_rl.env.router_env import LLMRouterEnv
-from llm_router_rl.models.real_llm import RealLLMPool
-from llm_router_rl.models.policy_network import PolicyNetwork
-from llm_router_rl.training.ppo import PPOTrainer
+from routent.config import Config
+from routent.data.dataset_loader import load_benchmark
+from routent.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
+from routent.env.router_env import LLMRouterEnv
+from routent.models.real_llm import RealLLMPool
+from routent.models.policy_network import PolicyNetwork
+from routent.training.ppo import PPOTrainer
 
 
 def parse_args() -> argparse.Namespace:

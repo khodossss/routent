@@ -161,7 +161,7 @@ class SentenceEmbeddingFeatureExtractor(BaseFeatureExtractor):
         device: str = "cpu",
     ) -> None:
         from sentence_transformers import SentenceTransformer
-        from llm_router_rl.models.real_llm import _print_download_notice
+        from routent.models.real_llm import _print_download_notice
         _print_download_notice(model_name)
         self._model_name = model_name
         self._model = SentenceTransformer(model_name, device=device)

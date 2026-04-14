@@ -8,10 +8,10 @@ import torch
 import torch.nn as nn
 import numpy as np
 
-from llm_router_rl.config import Config
-from llm_router_rl.models.policy_network import PolicyNetwork
-from llm_router_rl.training.buffer import RolloutBuffer
-from llm_router_rl.evaluation.metrics import MetricsTracker
+from routent.config import Config
+from routent.models.policy_network import PolicyNetwork
+from routent.training.buffer import RolloutBuffer
+from routent.evaluation.metrics import MetricsTracker
 
 
 class PPOTrainer:
@@ -98,7 +98,7 @@ class PPOTrainer:
         3. Group by model, batch API calls
         4. Evaluate answers, compute rewards, fill buffer
         """
-        from llm_router_rl.evaluation.evaluator import Evaluator
+        from routent.evaluation.evaluator import Evaluator
 
         self.buffer.clear()
         self.rollout_records = []

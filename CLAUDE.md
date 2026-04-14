@@ -38,7 +38,7 @@ Benchmark Dataset (questions + ground truth answers)
 ## Project Structure
 
 ```
-llm_router_rl/
+routent/
 ├── README.md
 ├── requirements.txt
 ├── config.py                  # All hyperparameters and settings

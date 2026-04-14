@@ -12,12 +12,12 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from llm_router_rl.config import Config
-from llm_router_rl.data.dataset_loader import load_benchmark
-from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
-from llm_router_rl.env.router_env import LLMRouterEnv
-from llm_router_rl.models.real_llm import RealLLMPool
-from llm_router_rl.models.policy_network import PolicyNetwork
+from routent.config import Config
+from routent.data.dataset_loader import load_benchmark
+from routent.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
+from routent.env.router_env import LLMRouterEnv
+from routent.models.real_llm import RealLLMPool
+from routent.models.policy_network import PolicyNetwork
 
 
 def evaluate_policy(policy, env, benchmark, feature_extractor, num_runs=1):
@@ -93,7 +93,7 @@ def evaluate_baseline_fixed(model_idx, env, benchmark, num_runs=1):
 
 def main():
     parser = argparse.ArgumentParser(description="Evaluate trained LLM Router policy")
-    parser.add_argument("--checkpoint", type=str, default="llm_router_rl/checkpoints/policy_best.pt")
+    parser.add_argument("--checkpoint", type=str, default="routent/checkpoints/policy_best.pt")
     parser.add_argument("--num_runs", type=int, default=1)
     args = parser.parse_args()
 
