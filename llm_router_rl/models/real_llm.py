@@ -25,7 +25,30 @@ _KNOWN_PARAMS = {
     "google": {"temperature", "max_tokens", "top_p", "top_k", "timeout", "max_retries"},
     "anthropic": {"temperature", "max_tokens", "top_p", "top_k", "timeout", "max_retries", "stop"},
     "ollama": {"temperature", "top_p", "top_k", "num_predict", "stop", "timeout"},
+    "huggingface": {"temperature", "max_new_tokens", "top_p", "top_k", "repetition_penalty", "task"},
+    "huggingface_local": {"temperature", "max_new_tokens", "top_p", "top_k", "repetition_penalty", "device", "task"},
 }
+
+
+def _is_hf_model_cached(model_id: str) -> bool:
+    """Check if a HuggingFace model is already downloaded to local cache."""
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache = scan_cache_dir()
+        for repo in cache.repos:
+            if repo.repo_id == model_id:
+                return True
+        return False
+    except Exception:
+        return False
+
+
+def _print_download_notice(model_id: str) -> None:
+    """Print 'downloading' notice if model isn't cached yet."""
+    if not _is_hf_model_cached(model_id):
+        print(f"  downloading {model_id}... (first-time download may take a while)")
+    else:
+        print(f"  loading {model_id} from cache")
 
 
 def _create_langchain_llm(provider: str, model_name: str, **kwargs):
@@ -66,10 +89,36 @@ def _create_langchain_llm(provider: str, model_name: str, **kwargs):
         from langchain_ollama import ChatOllama
         return ChatOllama(model=model_name, **direct_params)
 
+    elif provider in ("huggingface", "hf"):
+        # HuggingFace Serverless Inference API (remote, needs HF_TOKEN)
+        from langchain_huggingface import HuggingFaceEndpoint, ChatHuggingFace
+        endpoint_kwargs = {k: v for k, v in direct_params.items() if k != "model_kwargs"}
+        endpoint = HuggingFaceEndpoint(
+            repo_id=model_name,
+            task=endpoint_kwargs.pop("task", "text-generation"),
+            **endpoint_kwargs,
+        )
+        return ChatHuggingFace(llm=endpoint)
+
+    elif provider in ("huggingface_local", "hf_local"):
+        # Local inference via transformers (no API, runs on your machine)
+        from langchain_huggingface import HuggingFacePipeline, ChatHuggingFace
+
+        _print_download_notice(model_name)
+
+        pipeline_kwargs = {k: v for k, v in direct_params.items() if k != "model_kwargs"}
+        pipeline = HuggingFacePipeline.from_model_id(
+            model_id=model_name,
+            task=pipeline_kwargs.pop("task", "text-generation"),
+            device=pipeline_kwargs.pop("device", -1),  # -1 = CPU, 0 = first GPU
+            pipeline_kwargs={k: v for k, v in pipeline_kwargs.items() if k != "temperature" or v > 0},
+        )
+        return ChatHuggingFace(llm=pipeline)
+
     else:
         raise ValueError(
             f"Unknown provider '{provider}'. "
-            f"Supported: openai, google, anthropic, ollama"
+            f"Supported: openai, google, anthropic, ollama, huggingface, huggingface_local"
         )
 
 

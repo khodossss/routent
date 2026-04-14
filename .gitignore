@@ -4,8 +4,7 @@
 !.env.example
 
 # Training artifacts
-llm_router_rl/results/
-llm_router_rl/checkpoints/
+results/
 llm_router_rl/data/benchmark*.json
 
 # Python

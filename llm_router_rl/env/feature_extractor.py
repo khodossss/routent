@@ -143,3 +143,45 @@ class TfidfFeatureExtractor(BaseFeatureExtractor):
 
         combined = np.concatenate([tfidf_dense, hc_norm])
         return torch.tensor(combined, dtype=torch.float32)
+
+
+class SentenceEmbeddingFeatureExtractor(BaseFeatureExtractor):
+    """Feature extractor using sentence-transformers embeddings.
+
+    Produces semantic embeddings that capture meaning far better than TF-IDF,
+    especially for cross-domain routing.
+
+    Default model: all-MiniLM-L6-v2 (384 dims, fast, CPU-friendly).
+    Other good options: all-mpnet-base-v2 (768d, higher quality).
+    """
+
+    def __init__(
+        self,
+        model_name: str = "sentence-transformers/all-MiniLM-L6-v2",
+        device: str = "cpu",
+    ) -> None:
+        from sentence_transformers import SentenceTransformer
+        from llm_router_rl.models.real_llm import _print_download_notice
+        _print_download_notice(model_name)
+        self._model_name = model_name
+        self._model = SentenceTransformer(model_name, device=device)
+        self._dim = self._model.get_sentence_embedding_dimension()
+        self._is_fitted = False
+
+    @property
+    def feature_dim(self) -> int:
+        return self._dim
+
+    def fit(self, corpus: List[str]) -> None:
+        """No fitting needed — embeddings are pretrained."""
+        self._is_fitted = True
+
+    def transform(self, prompt: str) -> torch.Tensor:
+        """Transform a single prompt into a sentence embedding."""
+        emb = self._model.encode(prompt, convert_to_numpy=True, show_progress_bar=False)
+        return torch.tensor(emb, dtype=torch.float32)
+
+    def transform_batch(self, prompts: List[str]) -> torch.Tensor:
+        """Batch encode — much faster than per-prompt transform()."""
+        emb = self._model.encode(prompts, convert_to_numpy=True, show_progress_bar=False)
+        return torch.tensor(emb, dtype=torch.float32)

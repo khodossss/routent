@@ -1,8 +1,10 @@
 """Evaluate a trained LLM Router policy against baselines."""
 
+import os
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 import json
-import os
 import sys
 
 import numpy as np
@@ -12,7 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from llm_router_rl.config import Config
 from llm_router_rl.data.dataset_loader import load_benchmark
-from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor
+from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
 from llm_router_rl.env.router_env import LLMRouterEnv
 from llm_router_rl.models.real_llm import RealLLMPool
 from llm_router_rl.models.policy_network import PolicyNetwork
@@ -117,7 +119,13 @@ def main():
 
     print(f"Test set: {len(benchmark_test)} questions")
 
-    feature_extractor = TfidfFeatureExtractor(tfidf_max_features=config.tfidf_max_features)
+    if getattr(config, "feature_extractor", "tfidf") == "embeddings":
+        feature_extractor = SentenceEmbeddingFeatureExtractor(
+            model_name=config.embedding_model,
+            device=config.embedding_device,
+        )
+    else:
+        feature_extractor = TfidfFeatureExtractor(tfidf_max_features=config.tfidf_max_features)
     feature_extractor.fit([item["question"] for item in benchmark_train_for_fit])
 
     llm_pool = RealLLMPool(

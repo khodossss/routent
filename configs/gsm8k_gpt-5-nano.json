@@ -28,7 +28,7 @@
     "latency_range": [100, 3000],
     "cost_range": [0.0, 0.001],
 
-    "total_timesteps": 8196,
+    "total_timesteps": 4096,
     "rollout_steps": 256,
     "eval_interval": 256,
     "batch_size": 64,

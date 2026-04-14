@@ -1,0 +1,28 @@
+services:
+  train:
+    build: .
+    image: llm-router-rl:latest
+    env_file:
+      - .env
+    volumes:
+      # Configs (read-only)
+      - ./configs:/app/configs:ro
+      # Persistent training artifacts (results/checkpoints nested inside run dirs)
+      - ./results:/app/results
+      # Cache HuggingFace models between runs
+      - hf_cache:/root/.cache/huggingface
+    # Usage: docker compose run --rm train --config configs/gsm8k_gpt-5-nano.json
+
+  evaluate:
+    build: .
+    image: llm-router-rl:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./results:/app/results
+      - hf_cache:/root/.cache/huggingface
+    entrypoint: ["python", "-u", "llm_router_rl/scripts/evaluate.py"]
+
+volumes:
+  hf_cache:

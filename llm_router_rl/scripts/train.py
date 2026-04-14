@@ -1,8 +1,12 @@
 """Main training script for the LLM Router RL system."""
 
+import os
+# Must be set BEFORE any transformers/tokenizers import to prevent
+# Windows subprocess hang at exit
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
 import argparse
 import json
-import os
 import sys
 
 import numpy as np
@@ -12,7 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from llm_router_rl.config import Config
 from llm_router_rl.data.dataset_loader import load_benchmark
-from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor
+from llm_router_rl.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
 from llm_router_rl.env.router_env import LLMRouterEnv
 from llm_router_rl.models.real_llm import RealLLMPool
 from llm_router_rl.models.policy_network import PolicyNetwork
@@ -61,14 +65,16 @@ def main() -> None:
     from dotenv import load_dotenv
     load_dotenv()
 
-    # Create timestamped results directory
+    # Build run directory: {output_root}/{config_name}_{timestamp}/
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    config.results_dir = os.path.join(config.results_dir, timestamp)
-    config.checkpoint_dir = os.path.join(config.checkpoint_dir, timestamp)
+    config_name = os.path.splitext(os.path.basename(args.config))[0]
+    run_dir = os.path.join(config.output_root, f"{config_name}_{timestamp}")
+    config.results_dir = os.path.join(run_dir, "evaluations")
+    config.checkpoint_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(config.results_dir, exist_ok=True)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
-    print(f"Results dir: {config.results_dir}")
+    print(f"Run dir: {run_dir}")
 
     # Seed
     torch.manual_seed(config.seed)
@@ -79,9 +85,15 @@ def main() -> None:
     print(f"Loaded {len(benchmark_train)} training questions")
 
     # Fit feature extractor
-    feature_extractor = TfidfFeatureExtractor(
-        tfidf_max_features=config.tfidf_max_features
-    )
+    if config.feature_extractor == "embeddings":
+        feature_extractor = SentenceEmbeddingFeatureExtractor(
+            model_name=config.embedding_model,
+            device=config.embedding_device,
+        )
+    else:
+        feature_extractor = TfidfFeatureExtractor(
+            tfidf_max_features=config.tfidf_max_features
+        )
     corpus = [item["question"] for item in benchmark_train]
     feature_extractor.fit(corpus)
     config.total_feature_dim = feature_extractor.feature_dim

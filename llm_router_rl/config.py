@@ -50,9 +50,12 @@ class Config:
     rollout_steps: int = 200
 
     # ── Feature extraction ───────────────────────────────────────────
+    # Type: "tfidf" (fast, domain-specific) or "embeddings" (semantic, cross-domain)
+    feature_extractor: str = "embeddings"
     tfidf_max_features: int = 100
-    handcrafted_features: int = 10
-    total_feature_dim: int = 110
+    embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+    embedding_device: str = "cpu"
+    total_feature_dim: int = 384  # auto-set after fit
 
     # ── Model pool (derived at runtime) ──────────────────────────────
     num_models: int = 0
@@ -63,6 +66,8 @@ class Config:
     eval_interval: int = 200
     seed: int = 42
 
-    # ── Paths ────────────────────────────────────────────────────────
-    checkpoint_dir: str = "llm_router_rl/checkpoints"
-    results_dir: str = "llm_router_rl/results"
+    # ── Paths (resolved at runtime based on config name + timestamp) ─
+    # Base output directory; actual run goes into {output_root}/{config_name}_{timestamp}/
+    output_root: str = "results"
+    checkpoint_dir: str = ""  # auto-set: {output_root}/{run_name}/checkpoints
+    results_dir: str = ""     # auto-set: {output_root}/{run_name}/evaluations

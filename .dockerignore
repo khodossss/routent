@@ -1,0 +1,28 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Don't bake training artifacts into image
+llm_router_rl/results/
+llm_router_rl/checkpoints/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+CLAUDE.md
+Dockerfile
+docker-compose.yml
