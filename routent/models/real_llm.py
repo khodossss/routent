@@ -131,11 +131,9 @@ def _extract_text(result) -> str:
     Handles different provider formats:
     - OpenAI/Anthropic: result.content is a string
     - Google: result.content can be a list of dicts with 'text' keys
+    - HuggingFacePipeline: returns full prompt + completion with chat template tokens
     """
     content = result.content if hasattr(result, "content") else result
-
-    if isinstance(content, str):
-        return content
 
     if isinstance(content, list):
         parts = []
@@ -146,9 +144,43 @@ def _extract_text(result) -> str:
                 parts.append(item)
             else:
                 parts.append(str(item))
-        return " ".join(parts)
+        content = " ".join(parts)
 
-    return str(content)
+    text = content if isinstance(content, str) else str(content)
+    return _strip_chat_template(text)
+
+
+def _strip_chat_template(text: str) -> str:
+    """Remove chat template tokens and extract only the assistant's response.
+
+    Handles common chat formats:
+    - ChatML: <|im_start|>assistant\\n...<|im_end|>
+    - Llama 3: <|start_header_id|>assistant<|end_header_id|>...
+    - Mistral/Llama 2: [INST] ... [/INST]
+    """
+    # ChatML format (Qwen, modern Llama)
+    if "<|im_start|>assistant" in text:
+        text = text.split("<|im_start|>assistant")[-1]
+        text = text.lstrip("\n").strip()
+        if "<|im_end|>" in text:
+            text = text.split("<|im_end|>")[0]
+        return text.strip()
+
+    # Llama 3 format
+    if "<|start_header_id|>assistant<|end_header_id|>" in text:
+        text = text.split("<|start_header_id|>assistant<|end_header_id|>")[-1]
+        if "<|eot_id|>" in text:
+            text = text.split("<|eot_id|>")[0]
+        return text.strip()
+
+    # Mistral/Llama 2 format
+    if "[/INST]" in text:
+        text = text.split("[/INST]")[-1]
+        if "</s>" in text:
+            text = text.split("</s>")[0]
+        return text.strip()
+
+    return text.strip()
 
 
 class RealLLM(BaseLLM):
@@ -165,6 +197,7 @@ class RealLLM(BaseLLM):
         cost_per_1m_input: float = 0.0,
         cost_per_1m_output: float = 0.0,
         system_prompt: str = SYSTEM_PROMPT,
+        max_concurrency: int = 1,
         **kwargs,
     ) -> None:
         self.provider = provider
@@ -175,6 +208,7 @@ class RealLLM(BaseLLM):
         self.cost_per_1m_input = cost_per_1m_input
         self.cost_per_1m_output = cost_per_1m_output
         self.system_prompt = system_prompt
+        self.max_concurrency = max(1, max_concurrency)
         self._llm = _create_langchain_llm(provider, model_name, **kwargs)
 
     def generate(
@@ -255,7 +289,11 @@ class RealLLM(BaseLLM):
         return input_tokens, output_tokens
 
     async def _ainvoke_one(self, prompt: str) -> Tuple[str, float, float]:
-        """Invoke a single prompt async, measuring individual latency."""
+        """Invoke a single prompt async, measuring individual latency.
+
+        Falls back to running sync invoke in a thread for providers that
+        don't support async (e.g. HuggingFacePipeline local).
+        """
         from langchain_core.messages import SystemMessage, HumanMessage
 
         messages = [SystemMessage(content=self.system_prompt), HumanMessage(content=prompt)]
@@ -264,7 +302,11 @@ class RealLLM(BaseLLM):
 
         start = time.perf_counter()
         try:
-            result = await self._llm.ainvoke(messages)
+            try:
+                result = await self._llm.ainvoke(messages)
+            except NotImplementedError:
+                # Provider doesn't support async (e.g. HuggingFacePipeline local)
+                result = await asyncio.to_thread(self._llm.invoke, messages)
             elapsed_ms = (time.perf_counter() - start) * 1000
 
             text = _extract_text(result)
@@ -273,24 +315,45 @@ class RealLLM(BaseLLM):
 
         except Exception as e:
             elapsed_ms = (time.perf_counter() - start) * 1000
+            # Catch async-unsupported error message too
+            if "async generation is not supported" in str(e).lower() or "does not support async" in str(e).lower():
+                try:
+                    start = time.perf_counter()
+                    result = await asyncio.to_thread(self._llm.invoke, messages)
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    text = _extract_text(result)
+                    cost = self._estimate_cost(result, input_text, text)
+                    return text, elapsed_ms, cost
+                except Exception as e2:
+                    elapsed_ms = (time.perf_counter() - start) * 1000
+                    return f"ERROR: {e2}", elapsed_ms, 0.0
             return f"ERROR: {e}", elapsed_ms, 0.0
 
     def batch_generate(
         self, prompts: List[str]
     ) -> List[Tuple[str, float, float]]:
-        """Send multiple prompts concurrently, each with individual latency measurement.
+        """Send multiple prompts with concurrency controlled by max_concurrency.
 
-        All calls run in parallel via asyncio. Each result has its own
-        real latency — not averaged across the batch.
+        - max_concurrency=1: fully sequential (best for local CPU models,
+          accurate latency).
+        - max_concurrency>1: parallel via asyncio.Semaphore (best for
+          vendor APIs that handle concurrent requests well).
 
         Returns:
             List of (response_text, latency_ms, cost) for each prompt.
         """
-        async def _run_all():
-            tasks = [self._ainvoke_one(p) for p in prompts]
-            return await asyncio.gather(*tasks)
+        if self.max_concurrency == 1:
+            return [self.generate(p, "", "", "") for p in prompts]
 
-        # Handle case where event loop is already running (e.g. Jupyter)
+        sem = asyncio.Semaphore(self.max_concurrency)
+
+        async def _one(p):
+            async with sem:
+                return await self._ainvoke_one(p)
+
+        async def _run_all():
+            return await asyncio.gather(*[_one(p) for p in prompts])
+
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -300,8 +363,7 @@ class RealLLM(BaseLLM):
             import nest_asyncio
             nest_asyncio.apply()
             return loop.run_until_complete(_run_all())
-        else:
-            return asyncio.run(_run_all())
+        return asyncio.run(_run_all())
 
 
 class RealLLMPool:
@@ -313,6 +375,7 @@ class RealLLMPool:
         model_costs_input: Optional[list] = None,
         model_costs_output: Optional[list] = None,
         model_kwargs: Optional[List[Dict]] = None,
+        model_concurrency: Optional[List[int]] = None,
         system_prompt: str = SYSTEM_PROMPT,
     ) -> None:
         """
@@ -320,9 +383,9 @@ class RealLLMPool:
             provider_models: List of (provider, model_name) tuples.
             model_costs_input: Cost per 1M input tokens per model.
             model_costs_output: Cost per 1M output tokens per model.
-            model_kwargs: List of dicts with extra kwargs per model,
-                          passed to the LangChain constructor.
-                          E.g. [{"reasoning": "minimal"}, {}]
+            model_kwargs: List of dicts with LangChain constructor kwargs per model.
+            model_concurrency: Max concurrent requests per model (1 = sequential).
+                               Use >1 for vendor APIs, 1 for local CPU models.
             system_prompt: System prompt sent with every request.
         """
         n = len(provider_models)
@@ -332,12 +395,16 @@ class RealLLMPool:
             model_costs_output = [0.0] * n
         if model_kwargs is None:
             model_kwargs = [{}] * n
+        if model_concurrency is None:
+            model_concurrency = [1] * n
 
         self.models = []
-        for (provider, model_name), ci, co, kw in zip(
-            provider_models, model_costs_input, model_costs_output, model_kwargs
+        for (provider, model_name), ci, co, kw, conc in zip(
+            provider_models, model_costs_input, model_costs_output, model_kwargs, model_concurrency
         ):
-            self.models.append(RealLLM(provider, model_name, ci, co, system_prompt, **kw))
+            self.models.append(
+                RealLLM(provider, model_name, ci, co, system_prompt, max_concurrency=conc, **kw)
+            )
 
     def get_model(self, index: int) -> RealLLM:
         return self.models[index]

@@ -1,16 +1,17 @@
 """Evaluate a trained LLM Router policy against baselines."""
 
 import os
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+import routent.utils.silence  # noqa: F401
 
 import argparse
 import json
-import sys
 
 import numpy as np
 import torch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from routent.config import Config
 from routent.data.dataset_loader import load_benchmark
@@ -133,6 +134,7 @@ def main():
         model_costs_input=config.model_costs_per_1m_input or None,
         model_costs_output=getattr(config, "model_costs_per_1m_output", None) or None,
         model_kwargs=getattr(config, "model_kwargs", None) or None,
+        model_concurrency=getattr(config, "model_concurrency", None) or None,
         system_prompt=getattr(config, "system_prompt", ""),
     )
 

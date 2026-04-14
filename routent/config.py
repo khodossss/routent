@@ -17,6 +17,11 @@ class Config:
     # E.g. [{"reasoning": "minimal"}, {}]
     model_kwargs: List[dict] = field(default_factory=list)
 
+    # Max concurrent calls per model (1 = sequential).
+    # Use >1 for vendor APIs (OpenAI, Google), 1 for local CPU models.
+    # E.g. [10, 10, 1, 1] for 2 APIs + 2 local models
+    model_concurrency: List[int] = field(default_factory=list)
+
     # System prompt sent to all models
     system_prompt: str = "Answer with ONLY the final numeric answer. No explanation, no units, no words. Just the number."
 

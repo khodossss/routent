@@ -14,6 +14,7 @@
 
     "model_costs_per_1m_input": [0.05, 0.05, 0.05],
     "model_costs_per_1m_output": [0.40, 0.40, 0.40],
+    "model_concurrency": [10, 10, 10],
 
     "dataset": "openai/gsm8k",
     "dataset_split": "train",
@@ -25,7 +26,7 @@
     "K_accuracy": 1.0,
     "K_latency": 0.25,
     "K_cost": 0.1,
-    "latency_range": [100, 5000],
+    "latency_range": [100, 10000],
     "cost_range": [0.0, 0.001],
 
     "total_timesteps": 4096,

@@ -165,7 +165,11 @@ class SentenceEmbeddingFeatureExtractor(BaseFeatureExtractor):
         _print_download_notice(model_name)
         self._model_name = model_name
         self._model = SentenceTransformer(model_name, device=device)
-        self._dim = self._model.get_sentence_embedding_dimension()
+        # Prefer new API, fall back to old one for older sentence-transformers
+        if hasattr(self._model, "get_embedding_dimension"):
+            self._dim = self._model.get_embedding_dimension()
+        else:
+            self._dim = self._model.get_sentence_embedding_dimension()
         self._is_fitted = False
 
     @property

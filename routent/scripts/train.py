@@ -1,18 +1,18 @@
 """Main training script for the LLM Router RL system."""
 
 import os
-# Must be set BEFORE any transformers/tokenizers import to prevent
-# Windows subprocess hang at exit
-os.environ["TOKENIZERS_PARALLELISM"] = "false"
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+
+# Suppress noisy third-party warnings (must be FIRST, before transformers imports)
+import routent.utils.silence  # noqa: F401
 
 import argparse
 import json
-import sys
 
 import numpy as np
 import torch
-
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 from routent.config import Config
 from routent.data.dataset_loader import load_benchmark
@@ -105,6 +105,7 @@ def main() -> None:
         model_costs_input=config.model_costs_per_1m_input or None,
         model_costs_output=config.model_costs_per_1m_output or None,
         model_kwargs=config.model_kwargs or None,
+        model_concurrency=config.model_concurrency or None,
         system_prompt=config.system_prompt,
     )
     config.num_models = llm_pool.num_models
@@ -184,7 +185,9 @@ def main() -> None:
         print(f"  {'-' * len(title)}")
         print(f"  Avg reward:  {summary['avg_reward']:.4f}")
         print(f"  Accuracy:    {summary['accuracy']:.4f}")
-        print(f"  Avg cost:    {summary['avg_cost']:.5f}")
+        cost = summary['avg_cost']
+        cost_str = f"{cost:.5f}" if abs(cost) >= 1e-4 or cost == 0 else f"{cost:.2e}"
+        print(f"  Avg cost:    {cost_str}")
         print(f"  Avg latency: {summary['avg_latency']:.1f} ms")
         print(f"  Model usage:")
         for m, pct in sorted(summary.get("per_model_usage", {}).items()):

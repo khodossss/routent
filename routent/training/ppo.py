@@ -14,6 +14,15 @@ from routent.training.buffer import RolloutBuffer
 from routent.evaluation.metrics import MetricsTracker
 
 
+def _fmt_cost(cost: float) -> str:
+    """Format cost: fixed-point for large values, scientific for tiny."""
+    if cost == 0:
+        return "0"
+    if abs(cost) >= 1e-4:
+        return f"{cost:.4f}"
+    return f"{cost:.2e}"
+
+
 class PPOTrainer:
     """PPO algorithm implemented from scratch for contextual bandit setting."""
 
@@ -290,7 +299,7 @@ class PPOTrainer:
                     f"Step {steps_done}/{total_timesteps} | "
                     f"Reward: {rollout_stats['avg_reward']:.3f} | "
                     f"Acc: {rollout_stats['accuracy']:.3f} | "
-                    f"Cost: {rollout_stats['avg_cost']:.4f} | "
+                    f"Cost: {_fmt_cost(rollout_stats['avg_cost'])} | "
                     f"Latency: {rollout_stats['avg_latency']:.0f}ms | "
                     f"Models: [{usage_str}]"
                 )
@@ -304,7 +313,7 @@ class PPOTrainer:
         """Save detailed per-question records to JSON."""
         import json
         os.makedirs(self.config.results_dir, exist_ok=True)
-        path = os.path.join(self.config.results_dir, f"rollout_step_{step}.json")
+        path = os.path.join(self.config.results_dir, f"eval_step_{step}.json")
 
         with open(path, "w", encoding="utf-8") as f:
             json.dump(self.rollout_records, f, indent=2, ensure_ascii=False, default=str)
