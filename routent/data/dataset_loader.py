@@ -1,7 +1,18 @@
-"""Dataset loader for HuggingFace benchmarks."""
+"""Dataset loader dispatcher.
+
+Routes a dataset name to the appropriate modular loader in
+`routent.data.loaders.*`. Each loader implements:
+
+    def load(split: str = "train",
+             max_samples: Optional[int] = None,
+             token: Optional[str] = None) -> List[dict]: ...
+
+and returns benchmark items with (at least) the keys: id, question, answer,
+category, metadata. Classification/regression loaders additionally provide
+`choices`.
+"""
 
 import os
-import re
 from typing import List, Optional
 
 
@@ -12,87 +23,62 @@ def load_dataset_hf(
 ) -> List[dict]:
     """Load a HuggingFace dataset and convert to benchmark format.
 
-    Each item has: id, question, answer, category.
-
-    Supported datasets:
-        - openai/gsm8k: grade school math
-
     Args:
-        dataset_name: HuggingFace dataset identifier.
-        split: Dataset split ("train" or "test").
+        dataset_name: HuggingFace dataset identifier (e.g. "openai/gsm8k",
+            "cais/mmlu", "glue/sst2", "glue/stsb", "lmsys/mt_bench_human_judgments",
+            "google-research-datasets/go_emotions").
+        split: Dataset split ("train", "validation", "test").
         max_samples: Maximum number of samples to load.
 
     Returns:
         List of benchmark dicts.
-    """
-    from datasets import load_dataset
-    token = os.environ.get("HF_TOKEN")
 
-    if "gsm8k" in dataset_name.lower():
-        return _load_gsm8k(dataset_name, split, max_samples, token)
+    Raises:
+        ValueError: if the dataset name is not recognized.
+    """
+    token = os.environ.get("HF_TOKEN")
+    name = dataset_name.lower()
+
+    if "gsm8k" in name:
+        from routent.data.loaders.gsm8k import load as _load
+    elif "mmlu" in name:
+        from routent.data.loaders.mmlu import load as _load
+    elif "sst2" in name or "sst-2" in name or "glue/sst2" in name:
+        from routent.data.loaders.sst2 import load as _load
+    elif "stsb" in name or "sts-b" in name or "glue/stsb" in name:
+        from routent.data.loaders.stsb import load as _load
+    elif "mt_bench" in name or "mt-bench" in name:
+        from routent.data.loaders.mt_bench import load as _load
+    elif "goemotions" in name or "go_emotions" in name:
+        from routent.data.loaders.goemotions import load as _load
     else:
         raise ValueError(
-            f"Dataset '{dataset_name}' not yet supported. "
-            f"Supported: openai/gsm8k. "
-            f"Add a loader in dataset_loader.py."
+            f"Dataset '{dataset_name}' not supported. Supported: gsm8k, mmlu, "
+            f"sst2, stsb, mt_bench, goemotions. Add a loader in "
+            f"routent/data/loaders/ and register it in dataset_loader.py."
         )
 
-
-def _load_gsm8k(
-    dataset_name: str,
-    split: str,
-    max_samples: Optional[int],
-    token: Optional[str] = None,
-) -> List[dict]:
-    from datasets import load_dataset
-
-    ds = load_dataset(dataset_name, "main", split=split, token=token)
-
-    items = []
-    for i, row in enumerate(ds):
-        if max_samples is not None and i >= max_samples:
-            break
-
-        question = row["question"]
-        raw_answer = row["answer"]
-        final_answer = _extract_gsm8k_answer(raw_answer)
-
-        items.append({
-            "id": i + 1,
-            "question": question,
-            "answer": final_answer,
-            "category": "math",
-        })
-
-    return items
-
-
-def _extract_gsm8k_answer(raw_answer: str) -> str:
-    """Extract the final numeric answer from GSM8K's '####' format."""
-    if "####" in raw_answer:
-        final = raw_answer.split("####")[-1].strip()
-        final = final.replace(",", "")
-        return final
-    numbers = re.findall(r"-?\d+\.?\d*", raw_answer)
-    return numbers[-1] if numbers else raw_answer.strip()
+    return _load(split=split, max_samples=max_samples, token=token)
 
 
 def load_benchmark(config) -> tuple:
-    """Load benchmark from HuggingFace dataset.
+    """Load benchmark from HuggingFace dataset and split into train/test.
 
     Returns:
         (train_data, test_data)
     """
     total_needed = config.train_size + config.test_size
-    print(f"Loading dataset: {config.dataset} (split={config.dataset_split}, "
-          f"train_size={config.train_size}, test_size={config.test_size})")
+    print(
+        f"Loading dataset: {config.dataset} (split={config.dataset_split}, "
+        f"train_size={config.train_size}, test_size={config.test_size})"
+    )
     data = load_dataset_hf(
         config.dataset,
         split=config.dataset_split,
         max_samples=total_needed,
     )
 
-    train_data = data[:config.train_size]
-    test_data = data[config.train_size:config.train_size + config.test_size]
+    train_data = data[: config.train_size]
+    test_data = data[config.train_size : config.train_size + config.test_size]
     print(f"  {len(train_data)} train / {len(test_data)} test")
     return train_data, test_data

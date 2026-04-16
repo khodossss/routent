@@ -1,0 +1,5 @@
+{
+    "checkpoint": "results/gsm8k_gpt-5-nano_20260415_202503/checkpoints/policy_best.pt",
+
+    "embedding_device": "cpu"
+}

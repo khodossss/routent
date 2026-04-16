@@ -22,6 +22,11 @@ class Config:
     # E.g. [10, 10, 1, 1] for 2 APIs + 2 local models
     model_concurrency: List[int] = field(default_factory=list)
 
+    # Candidate labels per model (used by hf_zero_shot).
+    # Each element is a list of labels, or None for models that don't need them.
+    # E.g. [null, ["positive", "negative"], null]
+    model_labels: List = field(default_factory=list)
+
     # System prompt sent to all models
     system_prompt: str = "Answer with ONLY the final numeric answer. No explanation, no units, no words. Just the number."
 
@@ -32,12 +37,22 @@ class Config:
     train_size: int = 200
     test_size: int = 50
 
-    # Evaluation mode: "exact", "numeric" (for math), "fuzzy"
+    # Evaluation mode: "exact", "fuzzy", "numeric", "classification",
+    #                   "multilabel", "regression", "semantic", "llm_judge"
     eval_mode: str = "exact"
 
+    # Mode-specific settings (optional, see router_env._evaluate_answer)
+    # {"fuzzy_threshold": 0.85, "regression_tolerance": 0.1,
+    #  "semantic_threshold": 0.85, "multilabel_delimiter": ","}
+    eval_config: dict = field(default_factory=dict)
+
+    # For llm_judge mode: {"provider": "openai", "model_name": "gpt-5-nano",
+    #                       "prompt_template": "..."} (optional)
+    judge_config: dict = field(default_factory=dict)
+
     # ── Reward weights ───────────────────────────────────────────────
-    # reward = K_accuracy * correct - K_latency * norm_latency - K_cost * norm_cost
-    K_accuracy: float = 1.0
+    # reward = K_quality * correct - K_latency * norm_latency - K_cost * norm_cost
+    K_quality: float = 1.0
     K_latency: float = 0.3
     K_cost: float = 0.3
 
@@ -45,19 +60,15 @@ class Config:
     latency_range: Tuple[float, float] = (100.0, 5000.0)   # (min_ms, max_ms)
     cost_range: Tuple[float, float] = (0.0, 0.001)          # (min_$, max_$)
 
-    # ── PPO hyperparameters (contextual bandit) ──────────────────────
-    lr: float = 3e-4
-    clip_epsilon: float = 0.2
-    entropy_coef: float = 0.01
-    value_coef: float = 0.5
-    ppo_epochs: int = 4
-    batch_size: int = 64
+    # ── LinUCB hyperparameters ───────────────────────────────────────
+    # alpha controls exploration: larger → tries all models more aggressively.
+    # Typical range: 0.1 (exploit) … 2.0 (explore). Default 1.0 is a safe start.
+    linucb_alpha: float = 1.0
+
+    # rollout_steps is reused as the batch size in batched (cloud API) mode.
     rollout_steps: int = 200
 
     # ── Feature extraction ───────────────────────────────────────────
-    # Type: "tfidf" (fast, domain-specific) or "embeddings" (semantic, cross-domain)
-    feature_extractor: str = "embeddings"
-    tfidf_max_features: int = 100
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = "cpu"
     total_feature_dim: int = 384  # auto-set after fit

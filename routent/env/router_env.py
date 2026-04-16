@@ -16,7 +16,7 @@ class LLMRouterEnv(gym.Env):
     Each step is one independent routing decision (horizon=1).
     Observation: feature vector of the current prompt.
     Action: discrete index of the model to use.
-    Reward: K_accuracy * correct - K_latency * norm_latency - K_cost * norm_cost
+    Reward: K_quality * correct - K_latency * norm_latency - K_cost * norm_cost
     """
 
     metadata = {"render_modes": []}
@@ -26,12 +26,15 @@ class LLMRouterEnv(gym.Env):
         benchmark: List[dict],
         feature_extractor: BaseFeatureExtractor,
         llm_pool,
-        K_accuracy: float = 1.0,
+        K_quality: float = 1.0,
         K_latency: float = 0.3,
         K_cost: float = 0.3,
         latency_range: Tuple[float, float] = (100.0, 5000.0),
         cost_range: Tuple[float, float] = (0.0, 0.001),
         eval_mode: str = "exact",
+        eval_config: Optional[Dict[str, Any]] = None,
+        judge=None,
+        semantic_embedder=None,
         seed: Optional[int] = None,
     ) -> None:
         super().__init__()
@@ -39,10 +42,13 @@ class LLMRouterEnv(gym.Env):
         self.benchmark = benchmark
         self.feature_extractor = feature_extractor
         self.llm_pool = llm_pool
-        self.K_accuracy = K_accuracy
+        self.K_quality = K_quality
         self.K_latency = K_latency
         self.K_cost = K_cost
         self.eval_mode = eval_mode
+        self.eval_config = eval_config or {}
+        self.judge = judge
+        self.semantic_embedder = semantic_embedder
 
         self.observation_space = gym.spaces.Box(
             low=-np.inf,
@@ -82,12 +88,34 @@ class LLMRouterEnv(gym.Env):
         )
         return self._current_obs.numpy(), {}
 
-    def _evaluate_answer(self, predicted: str, ground_truth: str) -> bool:
-        if self.eval_mode == "numeric":
+    def _evaluate_answer(self, predicted: str, ground_truth: str, item: Optional[dict] = None) -> bool:
+        item = item or self._current_item or {}
+        mode = self.eval_mode
+        cfg = self.eval_config
+
+        if mode == "numeric":
             return Evaluator.numeric_match(predicted, ground_truth)
-        elif self.eval_mode == "fuzzy":
-            return Evaluator.fuzzy_match(predicted, ground_truth)
-        else:
+        elif mode == "fuzzy":
+            threshold = cfg.get("fuzzy_threshold", 0.85)
+            return Evaluator.fuzzy_match(predicted, ground_truth, threshold=threshold)
+        elif mode == "classification":
+            return Evaluator.classification_match(predicted, ground_truth, choices=item.get("choices"))
+        elif mode == "multilabel":
+            delim = cfg.get("multilabel_delimiter", ",")
+            return Evaluator.multilabel_match(predicted, ground_truth, delimiter=delim)
+        elif mode == "regression":
+            tolerance = item.get("tolerance", cfg.get("regression_tolerance", 0.1))
+            return Evaluator.regression_match(predicted, ground_truth, tolerance=tolerance)
+        elif mode == "semantic":
+            if self.semantic_embedder is None:
+                return False
+            threshold = cfg.get("semantic_threshold", 0.85)
+            return Evaluator.semantic_match(predicted, ground_truth, self.semantic_embedder, threshold=threshold)
+        elif mode == "llm_judge":
+            if self.judge is None:
+                return False
+            return Evaluator.llm_judge_match(predicted, ground_truth, self.judge, question=item.get("question", ""))
+        else:  # "exact"
             return Evaluator.exact_match(predicted, ground_truth)
 
     def _compute_reward(self, correct: bool, latency_ms: float, cost: float) -> float:
@@ -99,7 +127,7 @@ class LLMRouterEnv(gym.Env):
         norm_cost = max(0.0, min(1.0, norm_cost))
 
         return (
-            self.K_accuracy * float(correct)
+            self.K_quality * float(correct)
             - self.K_latency * norm_latency
             - self.K_cost * norm_cost
         )
@@ -115,7 +143,7 @@ class LLMRouterEnv(gym.Env):
             category=item.get("category", ""),
         )
 
-        correct = self._evaluate_answer(predicted, item["answer"])
+        correct = self._evaluate_answer(predicted, item["answer"], item=item)
         reward = self._compute_reward(correct, latency_ms, cost)
 
         # Update cumulative stats

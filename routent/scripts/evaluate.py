@@ -15,10 +15,10 @@ import torch
 
 from routent.config import Config
 from routent.data.dataset_loader import load_benchmark
-from routent.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
+from routent.env.feature_extractor import SentenceEmbeddingFeatureExtractor
 from routent.env.router_env import LLMRouterEnv
-from routent.models.real_llm import RealLLMPool
-from routent.models.policy_network import PolicyNetwork
+from routent.models.pool import LLMPool
+from routent.training.linucb import DisjointLinUCB
 
 
 def evaluate_policy(policy, env, benchmark, feature_extractor, num_runs=1):
@@ -41,7 +41,7 @@ def evaluate_policy(policy, env, benchmark, feature_extractor, num_runs=1):
                 item["question"], item["answer"],
                 item.get("difficulty", ""), item.get("category", ""),
             )
-            correct = env._evaluate_answer(predicted, item["answer"])
+            correct = env._evaluate_answer(predicted, item["answer"], item=item)
             reward = env._compute_reward(correct, latency, cost)
 
             total_correct += int(correct)
@@ -75,7 +75,7 @@ def evaluate_baseline_fixed(model_idx, env, benchmark, num_runs=1):
                 item["question"], item["answer"],
                 item.get("difficulty", ""), item.get("category", ""),
             )
-            correct = env._evaluate_answer(predicted, item["answer"])
+            correct = env._evaluate_answer(predicted, item["answer"], item=item)
             reward = env._compute_reward(correct, latency, cost)
 
             total_correct += int(correct)
@@ -120,21 +120,19 @@ def main():
 
     print(f"Test set: {len(benchmark_test)} questions")
 
-    if getattr(config, "feature_extractor", "tfidf") == "embeddings":
-        feature_extractor = SentenceEmbeddingFeatureExtractor(
-            model_name=config.embedding_model,
-            device=config.embedding_device,
-        )
-    else:
-        feature_extractor = TfidfFeatureExtractor(tfidf_max_features=config.tfidf_max_features)
+    feature_extractor = SentenceEmbeddingFeatureExtractor(
+        model_name=config.embedding_model,
+        device=config.embedding_device,
+    )
     feature_extractor.fit([item["question"] for item in benchmark_train_for_fit])
 
-    llm_pool = RealLLMPool(
+    llm_pool = LLMPool(
         provider_models=[tuple(pm) for pm in config.provider_models],
         model_costs_input=config.model_costs_per_1m_input or None,
         model_costs_output=getattr(config, "model_costs_per_1m_output", None) or None,
         model_kwargs=getattr(config, "model_kwargs", None) or None,
         model_concurrency=getattr(config, "model_concurrency", None) or None,
+        model_labels=getattr(config, "model_labels", None) or None,
         system_prompt=getattr(config, "system_prompt", ""),
     )
 
@@ -142,7 +140,7 @@ def main():
         benchmark=benchmark_test,
         feature_extractor=feature_extractor,
         llm_pool=llm_pool,
-        K_accuracy=config.K_accuracy,
+        K_quality=config.K_quality,
         K_latency=config.K_latency,
         K_cost=config.K_cost,
         latency_range=config.latency_range,
@@ -151,16 +149,17 @@ def main():
         seed=config.seed,
     )
 
-    policy = PolicyNetwork(
-        feature_dim=ckpt["feature_dim"],
+    agent = DisjointLinUCB(
         num_actions=ckpt["num_actions"],
+        feature_dim=ckpt["feature_dim"],
+        alpha=ckpt.get("linucb_alpha", 1.0),
     )
-    policy.load_state_dict(ckpt["policy_state_dict"])
-    policy.eval()
+    agent.A_inv = ckpt["linucb_A_inv"]
+    agent.b = ckpt["linucb_b"]
 
     print("\nEvaluating trained policy...")
     trained_results = evaluate_policy(
-        policy, env, benchmark_test, feature_extractor, num_runs=args.num_runs
+        agent, env, benchmark_test, feature_extractor, num_runs=args.num_runs
     )
 
     print("Evaluating baselines (each model individually)...")

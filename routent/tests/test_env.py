@@ -9,9 +9,23 @@ import torch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from routent.env.feature_extractor import TfidfFeatureExtractor
+import torch
 from routent.env.router_env import LLMRouterEnv
-from routent.models.llm_pool import BaseLLM
+from routent.models.base import BaseLLM
+
+
+class _FixedFeatureExtractor:
+    """Lightweight mock — returns a zero vector of fixed dim, no model downloads."""
+    DIM = 16
+
+    def fit(self, corpus): pass
+
+    def transform(self, prompt: str) -> torch.Tensor:
+        return torch.zeros(self.DIM, dtype=torch.float32)
+
+    @property
+    def feature_dim(self) -> int:
+        return self.DIM
 
 
 class StubLLM(BaseLLM):
@@ -43,7 +57,7 @@ BENCHMARK = [
 
 @pytest.fixture
 def setup():
-    fe = TfidfFeatureExtractor(tfidf_max_features=100)
+    fe = _FixedFeatureExtractor()
     fe.fit([item["question"] for item in BENCHMARK])
     env = LLMRouterEnv(
         benchmark=BENCHMARK, feature_extractor=fe, llm_pool=StubPool(), seed=42,

@@ -24,5 +24,18 @@ services:
       - hf_cache:/root/.cache/huggingface
     entrypoint: ["python", "-u", "routent/scripts/evaluate.py"]
 
+  infer:
+    build: .
+    image: routent:latest
+    env_file:
+      - .env
+    volumes:
+      - ./configs:/app/configs:ro
+      - ./results:/app/results:ro
+      - hf_cache:/root/.cache/huggingface
+    entrypoint: ["python", "-u", "routent/scripts/infer.py"]
+    # Usage:
+    #   docker compose run --rm infer configs/inference/gsm8k_gpt-5-nano.json "What is 15% of 80?"
+
 volumes:
   hf_cache:

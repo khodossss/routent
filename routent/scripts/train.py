@@ -16,11 +16,10 @@ import torch
 
 from routent.config import Config
 from routent.data.dataset_loader import load_benchmark
-from routent.env.feature_extractor import TfidfFeatureExtractor, SentenceEmbeddingFeatureExtractor
+from routent.env.feature_extractor import SentenceEmbeddingFeatureExtractor
 from routent.env.router_env import LLMRouterEnv
-from routent.models.real_llm import RealLLMPool
-from routent.models.policy_network import PolicyNetwork
-from routent.training.ppo import PPOTrainer
+from routent.models.pool import LLMPool
+from routent.training.linucb import DisjointLinUCB, LinUCBTrainer
 
 
 def parse_args() -> argparse.Namespace:
@@ -28,7 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--config", type=str, required=True, help="Path to JSON config file")
     parser.add_argument("--total_timesteps", type=int, default=None)
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--K_accuracy", type=float, default=None)
+    parser.add_argument("--K_quality", type=float, default=None)
     parser.add_argument("--K_latency", type=float, default=None)
     parser.add_argument("--K_cost", type=float, default=None)
     parser.add_argument("--lr", type=float, default=None)
@@ -49,7 +48,7 @@ def load_config(args) -> Config:
             setattr(config, k, v)
 
     # CLI overrides
-    for field in ("total_timesteps", "seed", "K_accuracy", "K_latency", "K_cost", "lr"):
+    for field in ("total_timesteps", "seed", "K_quality", "K_latency", "K_cost", "lr"):
         val = getattr(args, field, None)
         if val is not None:
             setattr(config, field, val)
@@ -85,60 +84,75 @@ def main() -> None:
     print(f"Loaded {len(benchmark_train)} training questions")
 
     # Fit feature extractor
-    if config.feature_extractor == "embeddings":
-        feature_extractor = SentenceEmbeddingFeatureExtractor(
-            model_name=config.embedding_model,
-            device=config.embedding_device,
-        )
-    else:
-        feature_extractor = TfidfFeatureExtractor(
-            tfidf_max_features=config.tfidf_max_features
-        )
+    feature_extractor = SentenceEmbeddingFeatureExtractor(
+        model_name=config.embedding_model,
+        device=config.embedding_device,
+    )
     corpus = [item["question"] for item in benchmark_train]
     feature_extractor.fit(corpus)
     config.total_feature_dim = feature_extractor.feature_dim
     print(f"Feature dim: {config.total_feature_dim}")
 
     # Create LLM pool
-    llm_pool = RealLLMPool(
+    llm_pool = LLMPool(
         provider_models=[tuple(pm) for pm in config.provider_models],
         model_costs_input=config.model_costs_per_1m_input or None,
         model_costs_output=config.model_costs_per_1m_output or None,
         model_kwargs=config.model_kwargs or None,
         model_concurrency=config.model_concurrency or None,
+        model_labels=config.model_labels or None,
         system_prompt=config.system_prompt,
     )
     config.num_models = llm_pool.num_models
     config.model_names = llm_pool.model_names
     print(f"Models ({config.num_models}): {config.model_names}")
 
+    # Create judge/embedder if eval mode needs them
+    judge = None
+    if config.eval_mode == "llm_judge" and config.judge_config:
+        from routent.evaluation.judges import create_judge_from_config
+        judge = create_judge_from_config(config.judge_config)
+        print(f"Judge: {config.judge_config.get('provider')}/{config.judge_config.get('model_name')}")
+
+    semantic_embedder = None
+    if config.eval_mode == "semantic":
+        semantic_embedder = lambda texts: feature_extractor._model.encode(
+            texts, convert_to_tensor=True, show_progress_bar=False
+        )
+
     # Create environment
     env = LLMRouterEnv(
         benchmark=benchmark_train,
         feature_extractor=feature_extractor,
         llm_pool=llm_pool,
-        K_accuracy=config.K_accuracy,
+        K_quality=config.K_quality,
         K_latency=config.K_latency,
         K_cost=config.K_cost,
         latency_range=config.latency_range,
         cost_range=config.cost_range,
         eval_mode=config.eval_mode,
+        eval_config=config.eval_config,
+        judge=judge,
+        semantic_embedder=semantic_embedder,
         seed=config.seed,
     )
 
-    # Create policy network
-    policy = PolicyNetwork(
-        feature_dim=config.total_feature_dim,
+    # Create LinUCB agent
+    agent = DisjointLinUCB(
         num_actions=config.num_models,
+        feature_dim=config.total_feature_dim,
+        alpha=config.linucb_alpha,
     )
-    print(f"Policy network: {sum(p.numel() for p in policy.parameters())} parameters")
+    print(
+        f"DisjointLinUCB: {config.num_models} arms × {config.total_feature_dim}-dim, "
+        f"alpha={config.linucb_alpha}"
+    )
 
     # Train
-    trainer = PPOTrainer(policy=policy, config=config)
+    trainer = LinUCBTrainer(agent=agent, config=config)
 
-    num_updates = config.total_timesteps // config.rollout_steps
-    print(f"\nTraining: {config.total_timesteps} steps, {config.rollout_steps}/rollout, {num_updates} PPO updates")
-    print(f"  K_accuracy={config.K_accuracy}, K_latency={config.K_latency}, K_cost={config.K_cost}")
+    print(f"\nTraining: {config.total_timesteps} steps, batch={config.rollout_steps}, alpha={config.linucb_alpha}")
+    print(f"  K_quality={config.K_quality}, K_latency={config.K_latency}, K_cost={config.K_cost}")
     print(f"  dataset={config.dataset}, eval_mode={config.eval_mode}")
     print(f"  latency_range={config.latency_range}, cost_range={config.cost_range}")
     print()
@@ -155,20 +169,39 @@ def main() -> None:
         "config": vars(config),
         "feature_dim": config.total_feature_dim,
         "num_actions": config.num_models,
+        "fe_mean": feature_extractor._mean,
+        "fe_std": feature_extractor._std,
     }
 
     final_path = os.path.join(config.checkpoint_dir, "policy_final.pt")
-    torch.save({**ckpt_base, "policy_state_dict": policy.state_dict()}, final_path)
+    torch.save(
+        {
+            **ckpt_base,
+            "linucb_A_inv": agent.A_inv,
+            "linucb_b": agent.b,
+            "linucb_alpha": agent.alpha,
+        },
+        final_path,
+    )
     print(f"\nSaved final checkpoint to {final_path}")
 
-    if trainer.best_state_dict is not None:
+    if trainer.best_A_inv is not None:
         best_path = os.path.join(config.checkpoint_dir, "policy_best.pt")
         torch.save(
-            {**ckpt_base, "policy_state_dict": trainer.best_state_dict,
-             "best_reward": trainer.best_reward, "best_step": trainer.best_step},
+            {
+                **ckpt_base,
+                "linucb_A_inv": trainer.best_A_inv,
+                "linucb_b": trainer.best_b,
+                "linucb_alpha": agent.alpha,
+                "best_reward": trainer.best_reward,
+                "best_step": trainer.best_step,
+            },
             best_path,
         )
-        print(f"Saved best checkpoint to {best_path} (reward={trainer.best_reward:.4f} at step {trainer.best_step})")
+        print(
+            f"Saved best checkpoint to {best_path} "
+            f"(reward={trainer.best_reward:.4f} at step {trainer.best_step})"
+        )
 
     # Save training log
     os.makedirs(config.results_dir, exist_ok=True)
@@ -201,7 +234,7 @@ def main() -> None:
     print("=" * 60)
     print_summary("Final policy (last 1000 steps)", final_summary)
 
-    if trainer.best_summary is not None:
+    if trainer.best_A_inv is not None:
         print_summary(
             f"Best policy (step {trainer.best_step}, reward={trainer.best_reward:.4f})",
             trainer.best_summary,

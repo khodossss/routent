@@ -153,7 +153,7 @@ class PPOTrainer:
             item = items[i]
             predicted, latency_ms, cost = responses[i]
 
-            correct = env._evaluate_answer(predicted, item["answer"])
+            correct = env._evaluate_answer(predicted, item["answer"], item=item)
             reward = env._compute_reward(correct, latency_ms, cost)
 
             self.buffer.add(obs_list[i], actions[i], log_probs[i], reward, values[i])
