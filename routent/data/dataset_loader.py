@@ -78,7 +78,13 @@ def load_benchmark(config) -> tuple:
         max_samples=total_needed,
     )
 
-    train_data = data[: config.train_size]
-    test_data = data[config.train_size : config.train_size + config.test_size]
+    if len(data) < total_needed:
+        print(f"  Warning: dataset has only {len(data)} items, requested {total_needed}")
+        split_point = int(len(data) * config.train_size / total_needed)
+        train_data = data[:split_point]
+        test_data = data[split_point:]
+    else:
+        train_data = data[: config.train_size]
+        test_data = data[config.train_size : config.train_size + config.test_size]
     print(f"  {len(train_data)} train / {len(test_data)} test")
     return train_data, test_data

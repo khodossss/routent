@@ -5,7 +5,7 @@
         ["google", "gemini-3.1-flash-lite-preview"]
     ],
     "model_kwargs": [
-        {"reasoning_effort": "low"},
+        {"reasoning_effort": "minimal"},
         {"reasoning_effort": "medium"},
         {}
     ],
@@ -19,14 +19,11 @@
     "test_size": 20,
 
     "eval_config": {
-        "mode": "llm_judge",
-        "judge_provider": "openai",
-        "judge_model": "gpt-5-nano-2025-08-07"
+        "mode": "semantic"
     },
-    "system_prompt": "Answer the question thoroughly and accurately.",
 
     "K_quality": 1.0,
-    "K_latency": 0.5,
+    "K_latency": 0.3,
     "K_cost": 0.3,
     "latency_range": [500, 10000],
     "cost_range": [0.0, 0.005],
@@ -34,7 +31,6 @@
     "total_timesteps": 512,
     "rollout_steps": 64,
     "eval_interval": 64,
-    "batch_size": 32,
 
     "seed": 42
 }

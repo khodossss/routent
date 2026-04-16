@@ -1,8 +1,9 @@
 """Answer correctness checker for LLM Router RL."""
 
 import difflib
+import json
 import re
-from typing import List, Optional
+from typing import Dict, List, Optional, Union
 
 
 class Evaluator:
@@ -14,25 +15,13 @@ class Evaluator:
         return predicted.strip().lower() == ground_truth.strip().lower()
 
     @staticmethod
-    def fuzzy_match(
-        predicted: str, ground_truth: str, threshold: float = 0.85
-    ) -> bool:
-        """Uses difflib.SequenceMatcher ratio for partial credit.
-
-        Args:
-            predicted: The model's answer.
-            ground_truth: The correct answer.
-            threshold: Minimum similarity ratio to count as a match.
-
-        Returns:
-            True if the similarity ratio >= threshold.
-        """
-        ratio = difflib.SequenceMatcher(
+    def fuzzy_score(predicted: str, ground_truth: str) -> float:
+        """SequenceMatcher ratio — continuous [0, 1]."""
+        return difflib.SequenceMatcher(
             None,
             predicted.strip().lower(),
             ground_truth.strip().lower(),
         ).ratio()
-        return ratio >= threshold
 
     @staticmethod
     def numeric_match(predicted: str, ground_truth: str) -> bool:
@@ -126,13 +115,81 @@ class Evaluator:
         return False
 
     @staticmethod
-    def multilabel_match(
-        predicted: str, ground_truth: str, delimiter: str = ","
-    ) -> bool:
-        """Compare predicted and ground_truth as sets of labels.
+    def classification_confidence_score(
+        predicted: str, ground_truth: str,
+    ) -> float:
+        """Extract probability of the correct class from a JSON response.
 
-        Splits both strings by ``delimiter``, strips whitespace, lowercases,
-        then checks for set equality. Empty tokens are excluded from sets.
+        Expects the model to return something like: {"positive": 0.92, "negative": 0.08}
+        Falls back to binary 0/1 if JSON parsing fails.
+        """
+        gt_lower = ground_truth.strip().lower()
+
+        # Try to parse JSON from the response
+        text = predicted.strip()
+        # Handle markdown code blocks
+        if "```" in text:
+            match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+            if match:
+                text = match.group(1)
+
+        try:
+            probs = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            # Try to find JSON-like substring
+            match = re.search(r"\{[^}]+\}", text)
+            if match:
+                try:
+                    probs = json.loads(match.group(0))
+                except (json.JSONDecodeError, TypeError):
+                    return 0.0
+            else:
+                return 0.0
+
+        if not isinstance(probs, dict):
+            return 0.0
+
+        # Find the probability of the ground truth class (case-insensitive)
+        for key, val in probs.items():
+            if str(key).strip().lower() == gt_lower:
+                try:
+                    return max(0.0, min(1.0, float(val)))
+                except (ValueError, TypeError):
+                    return 0.0
+
+        return 0.0
+
+    @staticmethod
+    def _parse_confidence_json(text: str) -> dict:
+        """Parse JSON probabilities from a model response. Returns {} on failure."""
+        text = text.strip()
+        if "```" in text:
+            m = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
+            if m:
+                text = m.group(1)
+        try:
+            probs = json.loads(text)
+            if isinstance(probs, dict):
+                return {str(k): v for k, v in probs.items()}
+        except (json.JSONDecodeError, TypeError):
+            m = re.search(r"\{[^}]+\}", text)
+            if m:
+                try:
+                    probs = json.loads(m.group(0))
+                    if isinstance(probs, dict):
+                        return {str(k): v for k, v in probs.items()}
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        return {}
+
+    @staticmethod
+    def multilabel_score(
+        predicted: str, ground_truth: str, delimiter: str = ","
+    ) -> float:
+        """Partial credit for multilabel: Jaccard similarity of label sets.
+
+        Returns |intersection| / |union|, so each correct label contributes.
+        Full match → 1.0, no overlap → 0.0.
         """
         if not isinstance(predicted, str):
             predicted = str(predicted)
@@ -149,16 +206,21 @@ class Evaluator:
             for t in ground_truth.split(delimiter)
             if t.strip()
         }
-        return pred_set == gt_set
+        if not gt_set and not pred_set:
+            return 1.0
+        if not gt_set or not pred_set:
+            return 0.0
+        intersection = pred_set & gt_set
+        union = pred_set | gt_set
+        return len(intersection) / len(union)
 
     @staticmethod
-    def regression_match(
+    def regression_score(
         predicted: str, ground_truth: str, tolerance: float = 0.01
-    ) -> bool:
-        """Parse both as floats, compare with absolute tolerance.
+    ) -> float:
+        """Continuous quality score for regression: 1.0 at exact match, 0.0 at/beyond tolerance.
 
-        Uses the same number-extraction logic as ``numeric_match``, but
-        returns True only if ``|pred - gt| <= tolerance``.
+        Formula: max(0, 1 - |pred - gt| / tolerance)
         """
         def extract_number(text) -> str:
             if not isinstance(text, str):
@@ -180,58 +242,58 @@ class Evaluator:
             pred_val = float(extract_number(predicted))
             gt_val = float(extract_number(ground_truth))
         except (ValueError, TypeError):
-            return False
+            return 0.0
 
-        return abs(pred_val - gt_val) <= tolerance
+        if tolerance <= 0:
+            return 1.0 if pred_val == gt_val else 0.0
+        return max(0.0, 1.0 - abs(pred_val - gt_val) / tolerance)
 
     @staticmethod
-    def semantic_match(
+    def semantic_score(
         predicted: str,
         ground_truth: str,
         embedder,
-        threshold: float = 0.85,
-    ) -> bool:
-        """Embedding-based semantic similarity.
+    ) -> float:
+        """Cosine similarity between embeddings — continuous [0, 1].
 
         ``embedder`` is a callable that takes ``List[str]`` and returns a 2D
-        torch tensor of shape ``(N, D)``. Returns True if cosine similarity
-        between the two embeddings is >= threshold. On any error, returns
-        False.
+        torch tensor of shape ``(N, D)``.
         """
         try:
             embeddings = embedder([predicted, ground_truth])
             try:
                 from sentence_transformers.util import cos_sim  # type: ignore
                 sim = cos_sim(embeddings[0], embeddings[1])
-                # cos_sim returns a 2D tensor
-                value = float(sim.reshape(-1)[0].item())
+                return max(0.0, float(sim.reshape(-1)[0].item()))
             except Exception:
                 import torch
-                a = embeddings[0]
-                b = embeddings[1]
-                a = a.reshape(-1).float()
-                b = b.reshape(-1).float()
+                a = embeddings[0].reshape(-1).float()
+                b = embeddings[1].reshape(-1).float()
                 denom = (torch.norm(a) * torch.norm(b)).item()
                 if denom == 0:
-                    return False
-                value = float(torch.dot(a, b).item() / denom)
-            return value >= threshold
+                    return 0.0
+                return max(0.0, float(torch.dot(a, b).item() / denom))
         except Exception:
-            return False
+            return 0.0
 
     @staticmethod
-    def llm_judge_match(
+    def llm_judge_score(
         predicted: str,
         ground_truth: str,
         judge,
         question: str = "",
-    ) -> bool:
-        """Delegate scoring to an LLM judge.
+        criteria: Optional[Union[List[str], Dict[str, float]]] = None,
+    ) -> float:
+        """Delegate scoring to an LLM judge — returns float [0, 1].
 
-        ``judge`` must expose ``.score(question, predicted, ground_truth) -> bool``.
-        Returns False on any exception.
+        criteria formats:
+        - None           → binary YES/NO (0.0/1.0)
+        - list[str]      → equal-weight average over criteria
+        - dict[str,float] → weighted average (weights auto-normalized)
         """
         try:
-            return bool(judge.score(question, predicted, ground_truth))
+            if criteria:
+                return judge.score_criteria(question, predicted, ground_truth, criteria)
+            return float(judge.score(question, predicted, ground_truth))
         except Exception:
-            return False
+            return 0.0

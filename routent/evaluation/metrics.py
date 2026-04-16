@@ -1,7 +1,7 @@
 """Training metrics tracker for LLM Router RL."""
 
 from collections import defaultdict
-from typing import Any, Dict, List
+from typing import Dict, List
 
 
 class MetricsTracker:
@@ -9,7 +9,7 @@ class MetricsTracker:
 
     def __init__(self) -> None:
         self.rewards: List[float] = []
-        self.corrects: List[bool] = []
+        self.qualities: List[float] = []
         self.costs: List[float] = []
         self.latencies: List[float] = []
         self.models_used: List[int] = []
@@ -20,7 +20,7 @@ class MetricsTracker:
 
     def log_step(self, info: dict, reward: float) -> None:
         self.rewards.append(reward)
-        self.corrects.append(info["correct"])
+        self.qualities.append(info["quality"])
         self.costs.append(info["cost"])
         self.latencies.append(info["latency_ms"])
         self.models_used.append(info["model_used"])
@@ -35,20 +35,20 @@ class MetricsTracker:
         if n == 0:
             return {
                 "avg_reward": 0.0,
-                "accuracy": 0.0,
+                "avg_quality": 0.0,
                 "avg_cost": 0.0,
                 "avg_latency": 0.0,
                 "per_model_usage": {},
             }
 
         recent_rewards = self.rewards[-n:]
-        recent_corrects = self.corrects[-n:]
+        recent_qualities = self.qualities[-n:]
         recent_costs = self.costs[-n:]
         recent_latencies = self.latencies[-n:]
         recent_models = self.models_used[-n:]
 
         avg_reward = sum(recent_rewards) / n
-        accuracy = sum(recent_corrects) / n
+        avg_quality = sum(recent_qualities) / n
         avg_cost = sum(recent_costs) / n
         avg_latency = sum(recent_latencies) / n
 
@@ -59,7 +59,7 @@ class MetricsTracker:
 
         return {
             "avg_reward": avg_reward,
-            "accuracy": accuracy,
+            "avg_quality": avg_quality,
             "avg_cost": avg_cost,
             "avg_latency": avg_latency,
             "per_model_usage": per_model_usage,
@@ -69,7 +69,7 @@ class MetricsTracker:
         return {
             "steps": {
                 "rewards": self.rewards,
-                "corrects": self.corrects,
+                "qualities": self.qualities,
                 "costs": self.costs,
                 "latencies": self.latencies,
                 "models_used": self.models_used,

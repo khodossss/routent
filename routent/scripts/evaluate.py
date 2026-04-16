@@ -37,14 +37,15 @@ def evaluate_policy(policy, env, benchmark, feature_extractor, num_runs=1):
             action, _, _ = policy.get_action(obs_tensor)
 
             model = env.llm_pool.get_model(action)
+            prompt = env._build_prompt(item)
             predicted, latency, cost = model.generate(
-                item["question"], item["answer"],
+                prompt, item["answer"],
                 item.get("difficulty", ""), item.get("category", ""),
             )
             correct = env._evaluate_answer(predicted, item["answer"], item=item)
             reward = env._compute_reward(correct, latency, cost)
 
-            total_correct += int(correct)
+            total_correct += correct
             total_cost += cost
             total_latency += latency
             total_reward += reward
@@ -52,7 +53,7 @@ def evaluate_policy(policy, env, benchmark, feature_extractor, num_runs=1):
             n += 1
 
     return {
-        "accuracy": total_correct / n,
+        "avg_quality": total_correct / n,
         "avg_cost": total_cost / n,
         "avg_latency": total_latency / n,
         "avg_reward": total_reward / n,
@@ -71,21 +72,22 @@ def evaluate_baseline_fixed(model_idx, env, benchmark, num_runs=1):
     for _ in range(num_runs):
         for item in benchmark:
             model = env.llm_pool.get_model(model_idx)
+            prompt = env._build_prompt(item)
             predicted, latency, cost = model.generate(
-                item["question"], item["answer"],
+                prompt, item["answer"],
                 item.get("difficulty", ""), item.get("category", ""),
             )
             correct = env._evaluate_answer(predicted, item["answer"], item=item)
             reward = env._compute_reward(correct, latency, cost)
 
-            total_correct += int(correct)
+            total_correct += correct
             total_cost += cost
             total_latency += latency
             total_reward += reward
             n += 1
 
     return {
-        "accuracy": total_correct / n,
+        "avg_quality": total_correct / n,
         "avg_cost": total_cost / n,
         "avg_latency": total_latency / n,
         "avg_reward": total_reward / n,
@@ -145,7 +147,7 @@ def main():
         K_cost=config.K_cost,
         latency_range=config.latency_range,
         cost_range=config.cost_range,
-        eval_mode=config.eval_mode,
+        eval_config=config.eval_config,
         seed=config.seed,
     )
 

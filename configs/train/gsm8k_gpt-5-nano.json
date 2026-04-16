@@ -21,7 +21,7 @@
     "train_size": 256,
     "test_size": 64,
 
-    "eval_mode": "numeric",
+    "eval_config": {"mode": "numeric"},
 
     "K_quality": 1.0,
     "K_latency": 0.25,

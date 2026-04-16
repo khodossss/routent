@@ -27,8 +27,9 @@ class Config:
     # E.g. [null, ["positive", "negative"], null]
     model_labels: List = field(default_factory=list)
 
-    # System prompt sent to all models
-    system_prompt: str = "Answer with ONLY the final numeric answer. No explanation, no units, no words. Just the number."
+    # System prompt sent to all models (format instructions are auto-generated
+    # from eval_config, so this should be generic or empty)
+    system_prompt: str = ""
 
     # ── Dataset ──────────────────────────────────────────────────────
     # HuggingFace dataset identifier, e.g. "openai/gsm8k"
@@ -37,18 +38,17 @@ class Config:
     train_size: int = 200
     test_size: int = 50
 
-    # Evaluation mode: "exact", "fuzzy", "numeric", "classification",
-    #                   "multilabel", "regression", "semantic", "llm_judge"
-    eval_mode: str = "exact"
-
-    # Mode-specific settings (optional, see router_env._evaluate_answer)
-    # {"fuzzy_threshold": 0.85, "regression_tolerance": 0.1,
-    #  "semantic_threshold": 0.85, "multilabel_delimiter": ","}
+    # ── Evaluation ────────────────────────────────────────────────────
+    # All evaluation settings live in one dict. Required key:
+    #   "mode": "exact"|"fuzzy"|"numeric"|"classification"|"multilabel"|
+    #           "regression"|"semantic"|"llm_judge"
+    #
+    # Mode-specific keys:
+    #   choices, output_format, multilabel_delimiter, regression_tolerance,
+    #   binary_threshold, prompt_suffix, semantic_model,
+    #   judge_criteria (list or dict), judge_provider, judge_model,
+    #   judge_prompt_template, custom_criteria
     eval_config: dict = field(default_factory=dict)
-
-    # For llm_judge mode: {"provider": "openai", "model_name": "gpt-5-nano",
-    #                       "prompt_template": "..."} (optional)
-    judge_config: dict = field(default_factory=dict)
 
     # ── Reward weights ───────────────────────────────────────────────
     # reward = K_quality * correct - K_latency * norm_latency - K_cost * norm_cost

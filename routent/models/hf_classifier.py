@@ -56,9 +56,9 @@ class HFClassifierLLM(BaseLLM):
         else:
             self._torch_device = torch.device("cpu")
 
-        # Resolve label map
+        # Resolve label map (normalize keys to int for consistent lookup)
         if label_map is not None:
-            self.label_map = label_map
+            self.label_map = {int(k): str(v) for k, v in label_map.items()}
         else:
             # model.config.id2label keys may be str or int — normalize to int
             raw = getattr(self._model.config, "id2label", {})

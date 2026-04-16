@@ -121,14 +121,14 @@ class TestEnvInfoDict:
         env, _ = setup
         env.reset()
         _, _, _, _, info = env.step(0)
-        for key in ("correct", "model_used", "latency_ms", "cost", "category", "question_id"):
+        for key in ("quality", "model_used", "latency_ms", "cost", "category", "question_id"):
             assert key in info
 
     def test_types(self, setup):
         env, _ = setup
         env.reset()
         _, _, _, _, info = env.step(0)
-        assert isinstance(info["correct"], bool)
+        assert isinstance(info["quality"], (bool, float, int))
         assert isinstance(info["latency_ms"], float)
 
 

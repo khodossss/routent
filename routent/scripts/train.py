@@ -47,6 +47,18 @@ def load_config(args) -> Config:
                 v = tuple(v)
             setattr(config, k, v)
 
+    # Migrate legacy eval_mode / judge_config into eval_config
+    if hasattr(config, "eval_mode") and config.eval_mode != "exact":
+        ec = config.eval_config
+        ec.setdefault("mode", config.eval_mode)
+    if hasattr(config, "judge_config") and config.judge_config:
+        ec = config.eval_config
+        jc = config.judge_config
+        ec.setdefault("judge_provider", jc.get("provider"))
+        ec.setdefault("judge_model", jc.get("model_name"))
+        if jc.get("prompt_template"):
+            ec.setdefault("judge_prompt_template", jc["prompt_template"])
+
     # CLI overrides
     for field in ("total_timesteps", "seed", "K_quality", "K_latency", "K_cost", "lr"):
         val = getattr(args, field, None)
@@ -54,6 +66,29 @@ def load_config(args) -> Config:
             setattr(config, field, val)
 
     return config
+
+
+class _TeeWriter:
+    """Duplicate stdout to both the terminal and a log file."""
+
+    def __init__(self, log_path: str):
+        self._terminal = sys.stdout
+        self._log = open(log_path, "w", encoding="utf-8")
+
+    def write(self, message):
+        self._terminal.write(message)
+        self._log.write(message)
+        self._log.flush()
+
+    def flush(self):
+        self._terminal.flush()
+        self._log.flush()
+
+    def isatty(self):
+        return False
+
+    def close(self):
+        self._log.close()
 
 
 def main() -> None:
@@ -68,11 +103,17 @@ def main() -> None:
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     config_name = os.path.splitext(os.path.basename(args.config))[0]
-    run_dir = os.path.join(config.output_root, f"{config_name}_{timestamp}")
+    run_dir = os.path.join(config.output_root, f"{timestamp}_{config_name}")
     config.results_dir = os.path.join(run_dir, "evaluations")
     config.checkpoint_dir = os.path.join(run_dir, "checkpoints")
     os.makedirs(config.results_dir, exist_ok=True)
     os.makedirs(config.checkpoint_dir, exist_ok=True)
+
+    # Tee all console output to report.txt
+    report_path = os.path.join(run_dir, "report.txt")
+    tee = _TeeWriter(report_path)
+    sys.stdout = tee
+
     print(f"Run dir: {run_dir}")
 
     # Seed
@@ -108,17 +149,37 @@ def main() -> None:
     print(f"Models ({config.num_models}): {config.model_names}")
 
     # Create judge/embedder if eval mode needs them
+    eval_cfg = config.eval_config
+    eval_mode = eval_cfg.get("mode", "exact")
+
     judge = None
-    if config.eval_mode == "llm_judge" and config.judge_config:
-        from routent.evaluation.judges import create_judge_from_config
-        judge = create_judge_from_config(config.judge_config)
-        print(f"Judge: {config.judge_config.get('provider')}/{config.judge_config.get('model_name')}")
+    if eval_mode == "llm_judge":
+        judge_provider = eval_cfg.get("judge_provider")
+        judge_model = eval_cfg.get("judge_model")
+        if judge_provider and judge_model:
+            from routent.evaluation.judges import create_judge_from_config
+            judge = create_judge_from_config({
+                "provider": judge_provider,
+                "model_name": judge_model,
+                "prompt_template": eval_cfg.get("judge_prompt_template"),
+                "custom_criteria": eval_cfg.get("custom_criteria"),
+            })
+            print(f"Judge: {judge_provider}/{judge_model}")
 
     semantic_embedder = None
-    if config.eval_mode == "semantic":
-        semantic_embedder = lambda texts: feature_extractor._model.encode(
-            texts, convert_to_tensor=True, show_progress_bar=False
-        )
+    if eval_mode == "semantic":
+        semantic_model_name = eval_cfg.get("semantic_model")
+        if semantic_model_name and semantic_model_name != config.embedding_model:
+            from sentence_transformers import SentenceTransformer
+            _sem_model = SentenceTransformer(semantic_model_name, device=config.embedding_device)
+            semantic_embedder = lambda texts: _sem_model.encode(
+                texts, convert_to_tensor=True, show_progress_bar=False
+            )
+            print(f"Semantic eval embedder: {semantic_model_name}")
+        else:
+            semantic_embedder = lambda texts: feature_extractor._model.encode(
+                texts, convert_to_tensor=True, show_progress_bar=False
+            )
 
     # Create environment
     env = LLMRouterEnv(
@@ -130,8 +191,7 @@ def main() -> None:
         K_cost=config.K_cost,
         latency_range=config.latency_range,
         cost_range=config.cost_range,
-        eval_mode=config.eval_mode,
-        eval_config=config.eval_config,
+        eval_config=eval_cfg,
         judge=judge,
         semantic_embedder=semantic_embedder,
         seed=config.seed,
@@ -153,7 +213,7 @@ def main() -> None:
 
     print(f"\nTraining: {config.total_timesteps} steps, batch={config.rollout_steps}, alpha={config.linucb_alpha}")
     print(f"  K_quality={config.K_quality}, K_latency={config.K_latency}, K_cost={config.K_cost}")
-    print(f"  dataset={config.dataset}, eval_mode={config.eval_mode}")
+    print(f"  dataset={config.dataset}, eval_mode={eval_mode}")
     print(f"  latency_range={config.latency_range}, cost_range={config.cost_range}")
     print()
 
@@ -217,7 +277,7 @@ def main() -> None:
         print(f"\n  {title}")
         print(f"  {'-' * len(title)}")
         print(f"  Avg reward:  {summary['avg_reward']:.4f}")
-        print(f"  Accuracy:    {summary['accuracy']:.4f}")
+        print(f"  Avg quality: {summary['avg_quality']:.4f}")
         cost = summary['avg_cost']
         cost_str = f"{cost:.5f}" if abs(cost) >= 1e-4 or cost == 0 else f"{cost:.2e}"
         print(f"  Avg cost:    {cost_str}")
@@ -239,6 +299,10 @@ def main() -> None:
             f"Best policy (step {trainer.best_step}, reward={trainer.best_reward:.4f})",
             trainer.best_summary,
         )
+
+    print(f"\nFull report saved to {report_path}")
+    sys.stdout = tee._terminal
+    tee.close()
 
 
 if __name__ == "__main__":

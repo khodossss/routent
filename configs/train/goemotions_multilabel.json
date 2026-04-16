@@ -1,0 +1,35 @@
+{
+    "provider_models": [
+        ["openai", "gpt-5-nano-2025-08-07"],
+        ["openai", "gpt-5-nano-2025-08-07"]
+    ],
+    "model_kwargs": [
+        {"reasoning_effort": "minimal"},
+        {"reasoning_effort": "medium"}
+    ],
+    "model_costs_per_1m_input": [0.05, 0.05],
+    "model_costs_per_1m_output": [0.40, 0.40],
+    "model_concurrency": [10, 10],
+
+    "dataset": "google-research-datasets/go_emotions",
+    "dataset_split": "train",
+    "train_size": 256,
+    "test_size": 64,
+
+    "eval_config": {
+        "mode": "multilabel",
+        "multilabel_delimiter": ","
+    },
+
+    "K_quality": 1.0,
+    "K_latency": 0.2,
+    "K_cost": 0.3,
+    "latency_range": [100, 5000],
+    "cost_range": [0.0, 0.001],
+
+    "total_timesteps": 1024,
+    "rollout_steps": 128,
+    "eval_interval": 128,
+
+    "seed": 42
+}

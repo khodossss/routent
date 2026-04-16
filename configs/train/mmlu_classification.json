@@ -20,8 +20,10 @@
     "train_size": 256,
     "test_size": 64,
 
-    "eval_mode": "classification",
-    "system_prompt": "Answer with ONLY the letter A, B, C, or D.",
+    "eval_config": {
+        "mode": "classification",
+        "choices": ["A", "B", "C", "D"]
+    },
 
     "K_quality": 1.0,
     "K_latency": 0.5,

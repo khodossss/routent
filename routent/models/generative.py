@@ -8,16 +8,17 @@ import asyncio
 import time
 from typing import Dict, List, Optional, Tuple
 
-import tiktoken
-
 from routent.models.base import BaseLLM
 
 
-# Shared tokenizer for cost estimation fallback (cl100k_base is a good approximation)
-_tokenizer = tiktoken.get_encoding("cl100k_base")
+_tokenizer = None
 
 
 def _count_tokens(text: str) -> int:
+    global _tokenizer
+    if _tokenizer is None:
+        import tiktoken
+        _tokenizer = tiktoken.get_encoding("cl100k_base")
     return len(_tokenizer.encode(text))
 
 
@@ -115,7 +116,7 @@ def _create_langchain_llm(provider: str, model_name: str, **kwargs):
         )
 
 
-SYSTEM_PROMPT = "Answer with ONLY the final numeric answer. No explanation, no units, no words. Just the number."
+SYSTEM_PROMPT = ""
 
 
 def _extract_text(result) -> str:

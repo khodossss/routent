@@ -215,10 +215,11 @@ class LinUCBTrainer:
                     "correct_answer": item["answer"],
                     "model_index": action,
                     "model_name": model_name,
-                    "correct": info["correct"],
+                    "quality": info["quality"],
                     "latency_ms": info["latency_ms"],
                     "cost": info["cost"],
                     "reward": reward,
+                    "eval_details": info.get("eval_details", {}),
                 }
             )
 
@@ -270,24 +271,48 @@ class LinUCBTrainer:
             responses: List[Optional[Tuple[str, float, float]]] = [None] * n
             for model_idx, step_indices in model_groups.items():
                 model = env.llm_pool.get_model(model_idx)
-                prompts = [items[i]["question"] for i in step_indices]
+                prompts = [env._build_prompt(items[i]) for i in step_indices]
                 batch_results = model.batch_generate(prompts)
                 for local_i, step_i in enumerate(step_indices):
                     responses[step_i] = batch_results[local_i]
 
-            # 4. Update agent + log
+            # 4. Evaluate quality (batched for llm_judge, per-item otherwise)
+            quality_scores: List[float] = []
+            eval_details_list: List[Dict] = []
+
+            if env.eval_mode == "llm_judge" and env.judge is not None:
+                criteria = env.eval_config.get("judge_criteria")
+                judge_items = [
+                    (items[i].get("question", ""), responses[i][0], items[i]["answer"])
+                    for i in range(n)
+                ]
+                if criteria:
+                    quality_scores = env.judge.batch_score_criteria(judge_items, criteria)
+                else:
+                    quality_scores = env.judge.batch_score(judge_items)
+                eval_details_list = [
+                    {"eval_mode": "llm_judge", "judge_details": d}
+                    for d in env.judge._last_batch_details
+                ]
+            else:
+                for i in range(n):
+                    q = env._evaluate_answer(responses[i][0], items[i]["answer"], item=items[i])
+                    quality_scores.append(q)
+                    eval_details_list.append(env._last_eval_details)
+
+            # 5. Update agent + log
             for i in range(n):
                 item = items[i]
                 predicted, latency_ms, cost = responses[i]
                 x = obs_list[i].astype(np.float64)
 
-                correct = env._evaluate_answer(predicted, item["answer"], item=item)
+                correct = quality_scores[i]
                 reward = env._compute_reward(correct, latency_ms, cost)
 
                 self.agent.update(actions[i], x, reward)
 
                 info = {
-                    "correct": correct,
+                    "quality": correct,
                     "model_used": actions[i],
                     "latency_ms": latency_ms,
                     "cost": cost,
@@ -308,10 +333,11 @@ class LinUCBTrainer:
                         "predicted_answer": predicted,
                         "model_index": actions[i],
                         "model_name": model_name,
-                        "correct": correct,
+                        "quality": correct,
                         "latency_ms": latency_ms,
                         "cost": cost,
                         "reward": reward,
+                        "eval_details": eval_details_list[i],
                     }
                 )
 
@@ -352,7 +378,7 @@ class LinUCBTrainer:
         print(
             f"Step {step}/{total} | "
             f"Reward: {summary['avg_reward']:.3f} | "
-            f"Acc: {summary['accuracy']:.3f} | "
+            f"Quality: {summary['avg_quality']:.3f} | "
             f"Cost: {_fmt_cost(summary['avg_cost'])} | "
             f"Latency: {summary['avg_latency']:.0f}ms | "
             f"Models: [{usage_str}]"

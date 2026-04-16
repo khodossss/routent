@@ -8,13 +8,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps first for layer caching
-COPY routent/requirements.txt ./requirements.txt
+COPY requirements.txt ./requirements.txt
 
-# CPU-only PyTorch (much smaller image)
+# CPU-only PyTorch (much smaller image), then everything from requirements.txt
 RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir python-dotenv datasets tiktoken sentence-transformers \
-        langchain-core langchain-openai langchain-google-genai langchain-huggingface
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY routent/ ./routent/
 
