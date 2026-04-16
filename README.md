@@ -1,5 +1,7 @@
 # Routent (Route Agent)
 
+> **Work in progress:** some functions or modules may not work correctly yet.
+
 An adaptive LLM router that learns which model — or which compute budget — to use for each query, optimizing a balance of accuracy, latency, and cost that you define.
 
 ---
@@ -36,17 +38,22 @@ Set `K_quality=1.0, K_cost=0.8, K_latency=0.2` and the router aggressively minim
 
 ## Comparison
 
-| | Routent | RouteLLM | LiteLLM | Martian | OpenRouter |
-|---|---|---|---|---|---|
-| **Learning** | Online (adapts per query) | Offline classifier | None | Offline (black box) | None |
-| **Reward function** | User-defined (3 coefficients) | Binary strong/weak | — | Proprietary | — |
-| **Providers** | Any mix | OpenAI-centric | Any | Any | Any |
-| **Local models** | Yes (HuggingFace) | No | Yes | No | No |
-| **Exploration** | LinUCB (principled UCB) | — | — | — | — |
-| **Convergence guarantee** | Yes (sublinear regret) | No | No | No | No |
-| **Open source** | Yes | Yes | Yes | No | No |
+| | Routent | RouteLLM | Not-Diamond | Unify.ai | LiteLLM | Martian | OpenRouter |
+|---|---|---|---|---|---|---|---|
+| **Learning** | Online (adapts per query) | Offline classifier | Offline classifier | Offline | None | Offline (black box) | None |
+| **Reward function** | User-defined (3 coefficients) | Binary strong/weak | Quality-optimized | Cost/quality preset | — | Proprietary | — |
+| **N models** | Unlimited | 2 (strong/weak) | 4+ | Any | Any | Any | Any |
+| **Providers** | Any mix | Any (OpenAI-compatible) | OpenAI, Anthropic, Google, Mistral | Any | Any | Any | Any |
+| **Local models** | Yes (HuggingFace) | No | No | No | Yes | No | No |
+| **Exploration** | LinUCB (principled UCB) | — | — | — | — | — | — |
+| **Convergence** | Yes (linear reward) | No | No | No | No | No | No |
+| **Open source** | Yes | Yes | No | No | Yes | No | No |
 
-**RouteLLM** (LMSYS) is the closest prior work — it trains a binary classifier to choose between a strong and a weak model. routent generalizes this: N models, continuous reward, online learning, no pre-labeled data needed.
+**RouteLLM** (LMSYS) trains a binary classifier (MF, BERT, or SW-ranking) to choose between a strong and a weak model. Routent generalizes: N models, continuous reward, online learning, no pre-labeled preference data needed.
+
+**Not-Diamond** uses a trained classifier to route between ~4 frontier models, optimizing for quality. No user-defined cost/latency tradeoffs, no local models, closed source.
+
+**Unify.ai** provides a meta-API that routes based on quality/cost/latency benchmarks. Routing is based on static benchmark scores, not learned from your traffic.
 
 **LiteLLM / OpenRouter** are proxies with rule-based routing (cost tiers, fallbacks). They don't learn from traffic.
 
@@ -132,3 +139,106 @@ Routing: "What is 15% of 80?"
 ```
 
 The checkpoint is self-contained: it stores the LinUCB parameters, the embedding centering stats, and the full model pool config. No training data needed at inference time.
+
+---
+
+## Evaluation modes
+
+All evaluation settings live in a single `eval_config` block inside the training config. The `mode` key selects how model responses are scored.
+
+### Modes overview
+
+| Mode | Quality type | What it does |
+|---|---|---|
+| `exact` | binary | Case-insensitive string match |
+| `numeric` | binary | Extracts numbers from text, compares (`#### 42` format supported) |
+| `fuzzy` | continuous | `SequenceMatcher` character-level similarity ratio [0, 1] |
+| `classification` | binary | Extracts class label from free text (A/B/C/D, words, choices) |
+| `classification` + confidence | continuous | Model returns JSON with per-class probabilities; quality = P(correct class) |
+| `multilabel` | continuous | Jaccard similarity of predicted vs expected label sets |
+| `regression` | continuous | `max(0, 1 − \|error\| / tolerance)` — closer predictions score higher |
+| `semantic` | continuous | Cosine similarity between sentence embeddings of response and reference |
+| `llm_judge` | binary | Another LLM answers YES/NO on correctness |
+| `llm_judge` + criteria | continuous | LLM scores on multiple criteria (1-10), weighted average |
+
+Any continuous mode can be switched to binary by adding `"binary_threshold": 0.85` to `eval_config`.
+
+### eval_config reference
+
+| Key | Type | Default | Used by |
+|---|---|---|---|
+| `mode` | `str` | `"exact"` | All — selects evaluation mode |
+| `choices` | `list[str]` | — | `classification` — auto-generates answer format prompt |
+| `output_format` | `str` | `"text"` | `classification` — set to `"confidence_json"` for continuous |
+| `multilabel_delimiter` | `str` | `","` | `multilabel` — label separator |
+| `regression_tolerance` | `float` | `0.1` | `regression` — error scale (can be overridden per-item) |
+| `semantic_model` | `str` | — | `semantic` — custom embedding model (defaults to feature extractor) |
+| `binary_threshold` | `float` | — | Any continuous mode — binarizes score at threshold |
+| `prompt_suffix` | `str` | — | All — appended to question (overrides auto-generated suffix) |
+| `judge_provider` | `str` | — | `llm_judge` — LLM provider for the judge |
+| `judge_model` | `str` | — | `llm_judge` — model name for the judge |
+| `judge_criteria` | `list` or `dict` | — | `llm_judge` — list (equal weights) or dict (weighted) |
+| `custom_criteria` | `list[dict]` | — | `llm_judge` — register custom criteria by name |
+
+### Config examples
+
+**Numeric (math benchmarks)**
+```json
+{"eval_config": {"mode": "numeric"}}
+```
+
+**Classification with auto-prompt**
+```json
+{"eval_config": {"mode": "classification", "choices": ["A", "B", "C", "D"]}}
+```
+
+**Classification with confidence scoring**
+```json
+{"eval_config": {"mode": "classification", "output_format": "confidence_json", "choices": ["positive", "negative"]}}
+```
+
+**Regression with tolerance**
+```json
+{"eval_config": {"mode": "regression", "regression_tolerance": 1.0}}
+```
+
+**LLM judge with weighted criteria**
+```json
+{
+  "eval_config": {
+    "mode": "llm_judge",
+    "judge_provider": "openai",
+    "judge_model": "gpt-5-nano-2025-08-07",
+    "judge_criteria": {"correctness": 0.5, "completeness": 0.3, "conciseness": 0.2}
+  }
+}
+```
+
+### Judge criteria presets
+
+| Preset | What it evaluates |
+|---|---|
+| `correctness` | Factual correctness vs reference answer |
+| `completeness` | Coverage of all key points |
+| `relevance` | On-topic relevance to the question |
+| `conciseness` | Brevity without unnecessary filler |
+| `coherence` | Logical clarity and readability |
+
+Any string not in this list is treated as a custom prompt template with `{question}`, `{predicted}`, `{ground_truth}` placeholders.
+
+---
+
+## Supported model types
+
+| Provider | Config key | Local/Cloud | Example |
+|---|---|---|---|
+| OpenAI | `"openai"` | Cloud | `gpt-5-nano-2025-08-07` |
+| Google Gemini | `"google"` | Cloud | `gemini-3.1-flash-lite-preview` |
+| Anthropic | `"anthropic"` | Cloud | `claude-haiku-4-5-20251001` |
+| Ollama | `"ollama"` | Local | `llama3.2` |
+| HuggingFace generative | `"huggingface_local"` | Local | `Qwen/Qwen2.5-3B-Instruct` |
+| HuggingFace classifier | `"hf_classifier"` | Local | `distilbert-base-uncased-finetuned-sst-2-english` |
+| HuggingFace zero-shot | `"hf_zero_shot"` | Local | `facebook/bart-large-mnli` |
+| HuggingFace regressor | `"hf_regressor"` | Local | `cross-encoder/stsb-roberta-large` |
+
+All model types can be mixed freely in the same pool. Local models have zero API cost — the router learns when the free model is good enough.
