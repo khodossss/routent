@@ -1,0 +1,4 @@
+{
+    "checkpoint": "results/20260419_084154_smoke_test/checkpoints/policy_best.pt",
+    "embedding_device": "cpu"
+}
