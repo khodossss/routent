@@ -102,7 +102,7 @@ python routent/scripts/train.py --config configs/train/gsm8k_gpt-5-nano.json
 
 Internally:
 
-- Each query is encoded into a 384-dimensional semantic embedding (MiniLM-L6-v2), zero-centered over the training corpus.
+- Each query is encoded into a 384-dimensional semantic embedding (MiniLM-L6-v2), zero-centered over the training corpus, then **PCA-projected to 32 dimensions** (configurable via `pca_dim`) and prepended with a **bias term** so LinUCB can learn per-arm baseline rewards.
 - **Disjoint LinUCB** maintains a separate linear reward model per arm. The UCB score — expected reward plus an uncertainty bonus — selects which model to call.
 - After the call, the reward is observed and the arm's parameters update in one matrix operation (Sherman-Morrison, O(d²)).
 - The uncertainty bonus shrinks as data accumulates for each arm, naturally shifting from exploration to exploitation.
@@ -138,7 +138,31 @@ Routing: "What is 15% of 80?"
   Cost    : $1.90e-06
 ```
 
-The checkpoint is self-contained: it stores the LinUCB parameters, the embedding centering stats, and the full model pool config. No training data needed at inference time.
+The checkpoint is self-contained: it stores the LinUCB parameters, the embedding centering stats, PCA components, bias config, and the full model pool config. No training data needed at inference time.
+
+---
+
+## Feature pipeline
+
+The raw sentence embedding is transformed through a small pipeline before hitting LinUCB:
+
+```
+raw sentence embedding  (MiniLM, 384-d)
+  ↓ subtract mean, divide by std    (zero-mean / unit-variance)
+  ↓ PCA projection                  (pca_dim components, default 32)
+  ↓ prepend constant 1.0            (bias term for per-arm baseline reward)
+final feature vector used by LinUCB (default 33-d: 32 PCA + 1 bias)
+```
+
+| Step | Why |
+|---|---|
+| **Centering** | MiniLM embeddings aren't zero-centered; LinUCB's linear model needs it |
+| **PCA (default 32)** | Keeps LinUCB's O(d²) matrices well-conditioned on small training sets |
+| **Bias (default on)** | Without it, zero-mean features can't encode "arm A is uniformly better than arm B" |
+
+Control via config: `"pca_dim": 32` (or `null` to disable), `"prepend_bias": true`.
+
+All transformations (mean, std, PCA components, bias flag) are saved in the checkpoint — inference replays the same pipeline with zero access to training data.
 
 ---
 
@@ -162,6 +186,8 @@ All evaluation settings live in a single `eval_config` block inside the training
 | `llm_judge` + criteria | continuous | LLM scores on multiple criteria (1-10), weighted average |
 
 Any continuous mode can be switched to binary by adding `"binary_threshold": 0.85` to `eval_config`.
+
+**Per-item eval_mode override.** Each dataset item may set its own `"eval_mode"` key, which overrides the config-level mode. This lets one training run mix domains — e.g., math questions scored with `numeric`, sentiment with `classification` — so the router learns domain-specific routing. Used by loaders like `gsm8k_sst2_mix`.
 
 ### eval_config reference
 
