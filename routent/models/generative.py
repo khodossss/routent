@@ -219,16 +219,26 @@ class GenerativeLLM(BaseLLM):
 
     @staticmethod
     def _extract_usage(result) -> Tuple[int, int]:
-        if hasattr(result, "usage_metadata") and result.usage_metadata:
-            um = result.usage_metadata
-            return (getattr(um, "input_tokens", 0) or 0,
-                    getattr(um, "output_tokens", 0) or 0)
-        if hasattr(result, "response_metadata"):
-            meta = result.response_metadata
-            if "token_usage" in meta:
-                tu = meta["token_usage"]
-                return (tu.get("prompt_tokens", 0) or 0,
-                        tu.get("completion_tokens", 0) or 0)
+        # usage_metadata on AIMessage is a TypedDict — use .get(), not getattr().
+        # For reasoning models (OpenAI o-series, gpt-5-*) output_tokens already
+        # includes reasoning_tokens per the OpenAI usage spec, so no extra
+        # addition is needed here.
+        um = getattr(result, "usage_metadata", None)
+        if um:
+            if isinstance(um, dict):
+                in_tok = int(um.get("input_tokens", 0) or 0)
+                out_tok = int(um.get("output_tokens", 0) or 0)
+            else:
+                in_tok = int(getattr(um, "input_tokens", 0) or 0)
+                out_tok = int(getattr(um, "output_tokens", 0) or 0)
+            if in_tok or out_tok:
+                return in_tok, out_tok
+
+        meta = getattr(result, "response_metadata", None)
+        if meta and "token_usage" in meta:
+            tu = meta["token_usage"]
+            return (int(tu.get("prompt_tokens", 0) or 0),
+                    int(tu.get("completion_tokens", 0) or 0))
         return 0, 0
 
     async def _ainvoke_one(self, prompt: str) -> Tuple[str, float, float]:
