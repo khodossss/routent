@@ -95,13 +95,20 @@ def main() -> None:
     fe = SentenceEmbeddingFeatureExtractor(
         model_name=config.embedding_model,
         device=getattr(config, "embedding_device", "cpu"),
+        pca_dim=ckpt.get("fe_pca_dim", getattr(config, "pca_dim", None)),
+        prepend_bias=ckpt.get("fe_prepend_bias", getattr(config, "prepend_bias", True)),
     )
     if "fe_mean" not in ckpt or ckpt["fe_mean"] is None:
         sys.exit(
             "Error: checkpoint has no embedded fe_mean/fe_std.\n"
             "Re-train with the current version of train.py to get a compatible checkpoint."
         )
-    fe.load_stats(ckpt["fe_mean"], ckpt["fe_std"])
+    fe.load_stats(
+        mean=ckpt["fe_mean"],
+        std=ckpt["fe_std"],
+        pca_components=ckpt.get("fe_pca_components"),
+        pca_input_mean=ckpt.get("fe_pca_input_mean"),
+    )
 
     # ── LLM pool ─────────────────────────────────────────────────────────────
     llm_pool = LLMPool(

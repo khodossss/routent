@@ -128,11 +128,17 @@ def main() -> None:
     feature_extractor = SentenceEmbeddingFeatureExtractor(
         model_name=config.embedding_model,
         device=config.embedding_device,
+        pca_dim=config.pca_dim,
+        prepend_bias=config.prepend_bias,
     )
     corpus = [item["question"] for item in benchmark_train]
     feature_extractor.fit(corpus)
     config.total_feature_dim = feature_extractor.feature_dim
-    print(f"Feature dim: {config.total_feature_dim}")
+    print(
+        f"Feature dim: {config.total_feature_dim} "
+        f"(raw {feature_extractor.raw_dim}, "
+        f"pca_dim={config.pca_dim}, prepend_bias={config.prepend_bias})"
+    )
 
     # Create LLM pool
     llm_pool = LLMPool(
@@ -231,6 +237,10 @@ def main() -> None:
         "num_actions": config.num_models,
         "fe_mean": feature_extractor._mean,
         "fe_std": feature_extractor._std,
+        "fe_pca_components": feature_extractor._pca_components,
+        "fe_pca_input_mean": feature_extractor._pca_input_mean,
+        "fe_prepend_bias": feature_extractor._prepend_bias,
+        "fe_pca_dim": feature_extractor._pca_dim,
     }
 
     final_path = os.path.join(config.checkpoint_dir, "policy_final.pt")

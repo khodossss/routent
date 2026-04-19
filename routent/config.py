@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 
 @dataclass
@@ -72,6 +72,17 @@ class Config:
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_device: str = "cpu"
     total_feature_dim: int = 384  # auto-set after fit
+
+    # PCA projection applied after sentence-embedding + centering.
+    # Reduces LinUCB parameters and speeds convergence on small training sets.
+    # 32 is a robust default for MiniLM 384-d embeddings.
+    # Set to None to disable PCA (raw centered embeddings).
+    pca_dim: Optional[int] = 32
+
+    # Prepend a constant 1.0 bias term to every feature vector. Required when
+    # training over zero-mean-centered embeddings so LinUCB can learn per-arm
+    # baseline rewards. Default on; turn off only to reproduce older runs.
+    prepend_bias: bool = True
 
     # ── Model pool (derived at runtime) ──────────────────────────────
     num_models: int = 0
