@@ -125,6 +125,8 @@ def main():
     feature_extractor = SentenceEmbeddingFeatureExtractor(
         model_name=config.embedding_model,
         device=config.embedding_device,
+        pca_dim=getattr(config, "pca_dim", None),
+        prepend_bias=getattr(config, "prepend_bias", True),
     )
     feature_extractor.fit([item["question"] for item in benchmark_train_for_fit])
 
@@ -175,12 +177,12 @@ def main():
     print("EVALUATION RESULTS")
     print("=" * 70)
 
-    header = f"{'Strategy':<35} {'Accuracy':>10} {'Avg Cost':>10} {'Avg Latency':>12} {'Reward':>10}"
+    header = f"{'Strategy':<35} {'Quality':>10} {'Avg Cost':>10} {'Avg Latency':>12} {'Reward':>10}"
     print(header)
     print("-" * 70)
 
     def print_row(name, r):
-        print(f"{name:<35} {r['accuracy']:>10.3f} {r['avg_cost']:>10.5f} {r['avg_latency']:>12.1f} {r['avg_reward']:>10.4f}")
+        print(f"{name:<35} {r['avg_quality']:>10.3f} {r['avg_cost']:>10.5f} {r['avg_latency']:>12.1f} {r['avg_reward']:>10.4f}")
 
     print_row("Trained Policy", trained_results)
     for name, result in baselines.items():
