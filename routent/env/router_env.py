@@ -101,9 +101,14 @@ class LLMRouterEnv(gym.Env):
 
         Also populates ``self._last_eval_details`` with mode-specific
         diagnostic info for transparency/debugging in saved JSON records.
+
+        If ``item["eval_mode"]`` is set, it overrides the config-level mode.
+        This lets multi-domain loaders (e.g. gsm8k_sst2_mix) score math items
+        with numeric match and sentiment items with classification in a
+        single training run.
         """
         item = item or self._current_item or {}
-        mode = self.eval_mode
+        mode = item.get("eval_mode", self.eval_mode)
         cfg = self.eval_config
         details: Dict[str, Any] = {"eval_mode": mode}
 
@@ -201,9 +206,13 @@ class LLMRouterEnv(gym.Env):
         return question
 
     def _auto_suffix(self, item: dict) -> Optional[str]:
-        """Generate format instructions based on eval mode."""
+        """Generate format instructions based on eval mode.
+
+        Honors a per-item ``eval_mode`` so multi-domain loaders can produce
+        the correct format hint for math vs. classification vs. ... items.
+        """
         cfg = self.eval_config
-        mode = self.eval_mode
+        mode = item.get("eval_mode", self.eval_mode)
 
         if mode == "numeric":
             return "Respond with ONLY the final numeric answer. No explanation, no units, no words."
